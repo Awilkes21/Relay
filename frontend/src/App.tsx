@@ -83,6 +83,12 @@ function collectPitchTypes(comparison: PitcherCompareResponse) {
       ...Object.keys(comparison.deltas.pitch_usage),
       ...Object.keys(comparison.period_a.metrics.average_velocity),
       ...Object.keys(comparison.period_b.metrics.average_velocity),
+      ...Object.keys(comparison.period_a.metrics.average_spin_rate),
+      ...Object.keys(comparison.period_b.metrics.average_spin_rate),
+      ...Object.keys(comparison.period_a.metrics.average_induced_vertical_break),
+      ...Object.keys(comparison.period_b.metrics.average_induced_vertical_break),
+      ...Object.keys(comparison.period_a.metrics.average_horizontal_break),
+      ...Object.keys(comparison.period_b.metrics.average_horizontal_break),
     ]),
   ).sort();
 }
@@ -209,6 +215,9 @@ function App() {
     : "-";
   const topVelocityDelta = comparison
     ? largestDeltaLabel(comparison.deltas.average_velocity, "number")
+    : "-";
+  const topSpinDelta = comparison
+    ? largestDeltaLabel(comparison.deltas.average_spin_rate, "number")
     : "-";
 
   return (
@@ -381,8 +390,12 @@ function App() {
                   <strong>{topUsageDelta}</strong>
                 </div>
                 <div className="metric-card">
-                  <span>Velocity Delta</span>
+                  <span>Pitch-Type Velo Delta</span>
                   <strong>{topVelocityDelta}</strong>
+                </div>
+                <div className="metric-card">
+                  <span>Pitch-Type Spin Delta</span>
+                  <strong>{topSpinDelta}</strong>
                 </div>
                 <div className="metric-card">
                   <span>Pitch Count</span>
@@ -430,6 +443,9 @@ function App() {
                         <th>Pitch</th>
                         <th>Usage</th>
                         <th>Velo</th>
+                        <th>Spin</th>
+                        <th>IVB</th>
+                        <th>HB</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -445,6 +461,27 @@ function App() {
                           <td>
                             {formatNumber(
                               comparison.period_a.metrics.average_velocity[
+                                pitchType
+                              ],
+                            )}
+                          </td>
+                          <td>
+                            {formatNumber(
+                              comparison.period_a.metrics.average_spin_rate[
+                                pitchType
+                              ],
+                              0,
+                            )}
+                          </td>
+                          <td>
+                            {formatNumber(
+                              comparison.period_a.metrics
+                                .average_induced_vertical_break[pitchType],
+                            )}
+                          </td>
+                          <td>
+                            {formatNumber(
+                              comparison.period_a.metrics.average_horizontal_break[
                                 pitchType
                               ],
                             )}
@@ -482,6 +519,9 @@ function App() {
                         <th>Pitch</th>
                         <th>Usage</th>
                         <th>Velo</th>
+                        <th>Spin</th>
+                        <th>IVB</th>
+                        <th>HB</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -501,6 +541,27 @@ function App() {
                               ],
                             )}
                           </td>
+                          <td>
+                            {formatNumber(
+                              comparison.period_b.metrics.average_spin_rate[
+                                pitchType
+                              ],
+                              0,
+                            )}
+                          </td>
+                          <td>
+                            {formatNumber(
+                              comparison.period_b.metrics
+                                .average_induced_vertical_break[pitchType],
+                            )}
+                          </td>
+                          <td>
+                            {formatNumber(
+                              comparison.period_b.metrics.average_horizontal_break[
+                                pitchType
+                              ],
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -509,7 +570,7 @@ function App() {
               </div>
 
               <div className="results-header">
-                <h3>Pitch Mix Diff</h3>
+                <h3>Pitch-Type Diff</h3>
                 <span>Period B minus Period A</span>
               </div>
               <div className="table-wrap">
@@ -523,6 +584,9 @@ function App() {
                       <th>A Velo</th>
                       <th>B Velo</th>
                       <th>Velo Delta</th>
+                      <th>Spin Delta</th>
+                      <th>IVB Delta</th>
+                      <th>HB Delta</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -564,6 +628,26 @@ function App() {
                         <td>
                           {formatDelta(
                             comparison.deltas.average_velocity[pitchType],
+                            "number",
+                          )}
+                        </td>
+                        <td>
+                          {formatDelta(
+                            comparison.deltas.average_spin_rate[pitchType],
+                            "number",
+                          )}
+                        </td>
+                        <td>
+                          {formatDelta(
+                            comparison.deltas.average_induced_vertical_break[
+                              pitchType
+                            ],
+                            "number",
+                          )}
+                        </td>
+                        <td>
+                          {formatDelta(
+                            comparison.deltas.average_horizontal_break[pitchType],
                             "number",
                           )}
                         </td>

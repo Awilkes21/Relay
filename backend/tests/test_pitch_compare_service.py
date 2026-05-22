@@ -27,6 +27,9 @@ class PitchCompareServiceTests(unittest.TestCase):
                 {
                     "pitch_type": "FF",
                     "release_speed": 96.0,
+                    "release_spin_rate": 2400,
+                    "pfx_z": 1.5,
+                    "pfx_x": -0.75,
                     "description": "called_strike",
                     "plate_x": 0.0,
                     "plate_z": 2.5,
@@ -34,6 +37,9 @@ class PitchCompareServiceTests(unittest.TestCase):
                 {
                     "pitch_type": "FF",
                     "release_speed": 98.0,
+                    "release_spin_rate": 2600,
+                    "pfx_z": 1.7,
+                    "pfx_x": -0.5,
                     "description": "swinging_strike",
                     "plate_x": 1.5,
                     "plate_z": 2.5,
@@ -41,6 +47,9 @@ class PitchCompareServiceTests(unittest.TestCase):
                 {
                     "pitch_type": "SL",
                     "release_speed": 86.0,
+                    "release_spin_rate": 2500,
+                    "pfx_z": 0.4,
+                    "pfx_x": 0.25,
                     "description": "ball",
                     "plate_x": None,
                     "plate_z": None,
@@ -54,6 +63,10 @@ class PitchCompareServiceTests(unittest.TestCase):
         self.assertEqual(summary["pitch_usage"]["SL"]["count"], 1)
         self.assertEqual(summary["average_velocity"]["FF"], 97.0)
         self.assertEqual(summary["average_velocity"]["SL"], 86.0)
+        self.assertEqual(summary["average_spin_rate"]["FF"], 2500)
+        self.assertEqual(summary["average_spin_rate"]["SL"], 2500)
+        self.assertAlmostEqual(summary["average_induced_vertical_break"]["FF"], 19.2)
+        self.assertEqual(summary["average_horizontal_break"]["SL"], 3.0)
         self.assertAlmostEqual(summary["strike_rate"], 2 / 3)
         self.assertAlmostEqual(summary["whiff_rate"], 1 / 3)
         self.assertAlmostEqual(summary["zone_rate"], 1 / 2)
@@ -64,6 +77,9 @@ class PitchCompareServiceTests(unittest.TestCase):
                 {
                     "pitch_type": "FF",
                     "release_speed": 96.0,
+                    "release_spin_rate": 2400,
+                    "pfx_z": 1.5,
+                    "pfx_x": -0.75,
                     "description": "called_strike",
                     "plate_x": 0.0,
                     "plate_z": 2.5,
@@ -75,6 +91,9 @@ class PitchCompareServiceTests(unittest.TestCase):
                 {
                     "pitch_type": "FF",
                     "release_speed": 98.0,
+                    "release_spin_rate": 2600,
+                    "pfx_z": 1.75,
+                    "pfx_x": -0.5,
                     "description": "ball",
                     "plate_x": 2.0,
                     "plate_z": 2.5,
@@ -82,6 +101,9 @@ class PitchCompareServiceTests(unittest.TestCase):
                 {
                     "pitch_type": "SL",
                     "release_speed": 87.0,
+                    "release_spin_rate": 2500,
+                    "pfx_z": 0.5,
+                    "pfx_x": 0.25,
                     "description": "swinging_strike",
                     "plate_x": 0.0,
                     "plate_z": 2.5,
@@ -96,6 +118,9 @@ class PitchCompareServiceTests(unittest.TestCase):
         self.assertEqual(deltas["pitch_usage"]["SL"]["count"], 1)
         self.assertEqual(deltas["average_velocity"]["FF"], 2.0)
         self.assertIsNone(deltas["average_velocity"]["SL"])
+        self.assertEqual(deltas["average_spin_rate"]["FF"], 200)
+        self.assertEqual(deltas["average_induced_vertical_break"]["FF"], 3.0)
+        self.assertEqual(deltas["average_horizontal_break"]["FF"], 3.0)
         self.assertEqual(deltas["strike_rate"], -0.5)
         self.assertEqual(deltas["whiff_rate"], 0.5)
         self.assertEqual(deltas["zone_rate"], -0.5)

@@ -32,6 +32,9 @@ export type PitchResult = {
   batter: number | null;
   pitch_type: string | null;
   release_speed: number | null;
+  release_spin_rate: number | null;
+  pfx_x: number | null;
+  pfx_z: number | null;
   plate_x: number | null;
   plate_z: number | null;
   balls: number | null;
@@ -63,6 +66,9 @@ export type PeriodMetrics = {
   pitch_count: number;
   pitch_usage: Record<string, PitchUsageMetric>;
   average_velocity: Record<string, number>;
+  average_spin_rate: Record<string, number>;
+  average_induced_vertical_break: Record<string, number>;
+  average_horizontal_break: Record<string, number>;
   strike_rate: number | null;
   whiff_rate: number | null;
   zone_rate: number | null;
@@ -72,6 +78,9 @@ export type CompareDelta = {
   pitch_count: number;
   pitch_usage: Record<string, PitchUsageMetric>;
   average_velocity: Record<string, number | null>;
+  average_spin_rate: Record<string, number | null>;
+  average_induced_vertical_break: Record<string, number | null>;
+  average_horizontal_break: Record<string, number | null>;
   strike_rate: number | null;
   whiff_rate: number | null;
   zone_rate: number | null;

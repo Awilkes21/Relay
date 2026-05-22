@@ -53,10 +53,24 @@ def _is_in_zone(pitch: dict[str, Any]) -> bool:
     return ZONE_LEFT <= plate_x <= ZONE_RIGHT and ZONE_BOTTOM <= plate_z <= ZONE_TOP
 
 
+def _average_by_pitch_type(values: dict[str, list[float]]) -> dict[str, float]:
+    return {
+        pitch_type: sum(group_values) / len(group_values)
+        for pitch_type, group_values in sorted(values.items())
+        if group_values
+    }
+
+
 def _summarize_period(pitches: list[dict[str, Any]]) -> dict[str, Any]:
     pitch_count = len(pitches)
     pitch_type_counts: dict[str, int] = defaultdict(int)
+    # Spin, velocity, and movement are intentionally bucketed by pitch_type.
+    # Comparing a slider's movement to a fastball's movement would be noisy, so
+    # Relay only computes these averages and deltas within the same pitch type.
     velocity_by_pitch_type: dict[str, list[float]] = defaultdict(list)
+    spin_by_pitch_type: dict[str, list[float]] = defaultdict(list)
+    ivb_by_pitch_type: dict[str, list[float]] = defaultdict(list)
+    horizontal_break_by_pitch_type: dict[str, list[float]] = defaultdict(list)
 
     strike_count = 0
     whiff_count = 0
@@ -70,6 +84,20 @@ def _summarize_period(pitches: list[dict[str, Any]]) -> dict[str, Any]:
         release_speed = pitch.get("release_speed")
         if release_speed is not None:
             velocity_by_pitch_type[pitch_type].append(release_speed)
+
+        release_spin_rate = pitch.get("release_spin_rate")
+        if release_spin_rate is not None:
+            spin_by_pitch_type[pitch_type].append(release_spin_rate)
+
+        # Statcast pfx_x/pfx_z are in feet. Relay displays movement in inches
+        # so the comparison table uses the same units as the strike-zone detail.
+        pfx_z = pitch.get("pfx_z")
+        if pfx_z is not None:
+            ivb_by_pitch_type[pitch_type].append(pfx_z * 12)
+
+        pfx_x = pitch.get("pfx_x")
+        if pfx_x is not None:
+            horizontal_break_by_pitch_type[pitch_type].append(pfx_x * 12)
 
         # Statcast descriptions are pitch outcomes. For this first pass, strike
         # rate is the share of pitches whose description is a called strike,
@@ -94,16 +122,16 @@ def _summarize_period(pitches: list[dict[str, Any]]) -> dict[str, Any]:
         }
         for pitch_type, count in sorted(pitch_type_counts.items())
     }
-    average_velocity = {
-        pitch_type: sum(velocities) / len(velocities)
-        for pitch_type, velocities in sorted(velocity_by_pitch_type.items())
-        if velocities
-    }
 
     return {
         "pitch_count": pitch_count,
         "pitch_usage": pitch_usage,
-        "average_velocity": average_velocity,
+        "average_velocity": _average_by_pitch_type(velocity_by_pitch_type),
+        "average_spin_rate": _average_by_pitch_type(spin_by_pitch_type),
+        "average_induced_vertical_break": _average_by_pitch_type(ivb_by_pitch_type),
+        "average_horizontal_break": _average_by_pitch_type(
+            horizontal_break_by_pitch_type
+        ),
         "strike_rate": _rate(strike_count, pitch_count),
         "whiff_rate": _rate(whiff_count, pitch_count),
         "zone_rate": _rate(zone_pitch_count, located_pitch_count),
@@ -117,10 +145,17 @@ def _period_delta(
     pitch_types = sorted(
         set(period_a["pitch_usage"].keys()) | set(period_b["pitch_usage"].keys())
     )
-    velocity_types = sorted(
-        set(period_a["average_velocity"].keys())
-        | set(period_b["average_velocity"].keys())
-    )
+    def metric_delta(metric_name: str) -> dict[str, float | int | None]:
+        pitch_types = sorted(
+            set(period_a[metric_name].keys()) | set(period_b[metric_name].keys())
+        )
+        return {
+            pitch_type: _delta(
+                period_a[metric_name].get(pitch_type),
+                period_b[metric_name].get(pitch_type),
+            )
+            for pitch_type in pitch_types
+        }
 
     return {
         "pitch_count": period_b["pitch_count"] - period_a["pitch_count"],
@@ -137,13 +172,12 @@ def _period_delta(
             }
             for pitch_type in pitch_types
         },
-        "average_velocity": {
-            pitch_type: _delta(
-                period_a["average_velocity"].get(pitch_type),
-                period_b["average_velocity"].get(pitch_type),
-            )
-            for pitch_type in velocity_types
-        },
+        "average_velocity": metric_delta("average_velocity"),
+        "average_spin_rate": metric_delta("average_spin_rate"),
+        "average_induced_vertical_break": metric_delta(
+            "average_induced_vertical_break"
+        ),
+        "average_horizontal_break": metric_delta("average_horizontal_break"),
         "strike_rate": _delta(period_a["strike_rate"], period_b["strike_rate"]),
         "whiff_rate": _delta(period_a["whiff_rate"], period_b["whiff_rate"]),
         "zone_rate": _delta(period_a["zone_rate"], period_b["zone_rate"]),
@@ -165,7 +199,8 @@ def _fetch_period_pitches(
 
     with duckdb.connect() as connection:
         cursor = connection.execute(
-            "SELECT pitch_type, release_speed, description, plate_x, plate_z "
+            "SELECT pitch_type, release_speed, release_spin_rate, pfx_x, pfx_z, "
+            "description, plate_x, plate_z "
             f"FROM read_parquet({_duckdb_string_literal(str(parquet_path))}) "
             "WHERE pitcher = ? AND game_date BETWEEN ? AND ?",
             [pitcher_id, start_date.isoformat(), end_date.isoformat()],
