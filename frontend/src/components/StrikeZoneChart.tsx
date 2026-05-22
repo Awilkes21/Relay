@@ -10,9 +10,9 @@ type PlottedPitch = PitchResult & {
   plate_z: number;
 };
 
-const width = 420;
-const height = 360;
-const padding = 36;
+const width = 560;
+const height = 460;
+const padding = 46;
 const baseXMin = -2.5;
 const baseXMax = 2.5;
 const baseZMin = 0;
@@ -21,6 +21,7 @@ const zoneLeft = -0.83;
 const zoneRight = 0.83;
 const zoneTop = 3.5;
 const zoneBottom = 1.5;
+const zoneMiddle = (zoneTop + zoneBottom) / 2;
 const zoomLevels = [1, 1.5, 2] as const;
 
 const pitchColors: Record<string, string> = {
@@ -52,6 +53,10 @@ function pitchColor(pitchType: string | null) {
   return pitchType ? pitchColors[pitchType] ?? "#2f6f9f" : "#7f92a8";
 }
 
+function pitcherViewX(plateX: number) {
+  return plateX * -1;
+}
+
 function formatTooltip(pitch: PitchResult) {
   const count =
     pitch.balls === null && pitch.strikes === null
@@ -64,6 +69,10 @@ function formatTooltip(pitch: PitchResult) {
     `Spin: ${formatSpin(pitch.release_spin_rate)}`,
     `Induced vertical break: ${formatBreak(pitch.pfx_z)}`,
     `Horizontal break: ${formatBreak(pitch.pfx_x)}`,
+    `Exit velocity: ${formatContactNumber(pitch.launch_speed, "mph")}`,
+    `Launch angle: ${formatContactNumber(pitch.launch_angle, "deg", 0)}`,
+    `Batted ball: ${formatBattedBall(pitch.bb_type)}`,
+    "View: Pitcher",
     `Description: ${pitch.description ?? ""}`,
     count,
   ].join("\n");
@@ -79,6 +88,18 @@ function formatSpin(value: number | null) {
 
 function formatBreak(value: number | null) {
   return value === null ? "-" : `${(value * 12).toFixed(1)} in`;
+}
+
+function formatContactNumber(value: number | null, unit: string, digits = 1) {
+  return value === null ? "-" : `${value.toFixed(digits)} ${unit}`;
+}
+
+function formatBattedBall(value: string | null) {
+  if (!value) return "-";
+  return value
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 function hasLocation(pitch: PitchResult): pitch is PlottedPitch {
@@ -110,6 +131,7 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
   const plottedPitches = pitches.filter(hasLocation);
   const [selectedPitch, setSelectedPitch] = useState<PlottedPitch | null>(null);
   const [zoom, setZoom] = useState<(typeof zoomLevels)[number]>(1);
+  const [isExpanded, setIsExpanded] = useState(false);
   const domain = domainForZoom(zoom);
   const legendItems = useMemo(
     () =>
@@ -124,10 +146,13 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
   }, [pitches]);
 
   return (
-    <section className="chart-panel" aria-labelledby="strike-zone-title">
+    <section
+      className={isExpanded ? "chart-panel chart-panel--expanded" : "chart-panel"}
+      aria-labelledby="strike-zone-title"
+    >
       <div className="chart-heading">
         <h3 id="strike-zone-title">Strike Zone</h3>
-        <span>{plottedPitches.length} plotted pitches</span>
+        <span>{plottedPitches.length} plotted pitches | pitcher view</span>
       </div>
 
       <div className="chart-tools">
@@ -147,17 +172,27 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
           )}
         </div>
 
-        <div className="zoom-controls" aria-label="Strike zone zoom controls">
-          {zoomLevels.map((level) => (
-            <button
-              className={zoom === level ? "zoom-button is-active" : "zoom-button"}
-              key={level}
-              onClick={() => setZoom(level)}
-              type="button"
-            >
-              {level}x
-            </button>
-          ))}
+        <div className="chart-controls">
+          <span className="chart-view-note">Pitcher Left / Pitcher Right</span>
+          <div className="zoom-controls" aria-label="Strike zone zoom controls">
+            {zoomLevels.map((level) => (
+              <button
+                className={zoom === level ? "zoom-button is-active" : "zoom-button"}
+                key={level}
+                onClick={() => setZoom(level)}
+                type="button"
+              >
+                {level}x
+              </button>
+            ))}
+          </div>
+          <button
+            className="secondary-button"
+            onClick={() => setIsExpanded((current) => !current)}
+            type="button"
+          >
+            {isExpanded ? "Collapse" : "Expand"}
+          </button>
         </div>
       </div>
 
@@ -196,8 +231,8 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
             className="plot-axis"
             x1={padding}
             x2={width - padding}
-            y1={scaleZ(zoneBottom, domain)}
-            y2={scaleZ(zoneBottom, domain)}
+            y1={scaleZ(zoneMiddle, domain)}
+            y2={scaleZ(zoneMiddle, domain)}
           />
           <rect
             className="strike-zone-box"
@@ -214,7 +249,7 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
                     ? "pitch-point pitch-point--selected"
                     : "pitch-point"
                 }
-                cx={scaleX(pitch.plate_x, domain)}
+                cx={scaleX(pitcherViewX(pitch.plate_x), domain)}
                 cy={scaleZ(pitch.plate_z, domain)}
                 fill={pitchColor(pitch.pitch_type)}
                 key={`${pitch.plate_x}-${pitch.plate_z}-${index}`}
@@ -261,6 +296,18 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
             <strong>{formatBreak(selectedPitch.pfx_x)}</strong>
           </div>
           <div>
+            <span>Exit Velo</span>
+            <strong>{formatContactNumber(selectedPitch.launch_speed, "mph")}</strong>
+          </div>
+          <div>
+            <span>Launch Angle</span>
+            <strong>{formatContactNumber(selectedPitch.launch_angle, "deg", 0)}</strong>
+          </div>
+          <div>
+            <span>Contact</span>
+            <strong>{formatBattedBall(selectedPitch.bb_type)}</strong>
+          </div>
+          <div>
             <span>Count</span>
             <strong>
               {selectedPitch.balls ?? "-"}-{selectedPitch.strikes ?? "-"}
@@ -272,9 +319,7 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
           </div>
           <div>
             <span>Location</span>
-            <strong>
-              {selectedPitch.plate_x.toFixed(2)}, {selectedPitch.plate_z.toFixed(2)}
-            </strong>
+            <strong>Pitcher view</strong>
           </div>
           <button
             className="detail-close-button"

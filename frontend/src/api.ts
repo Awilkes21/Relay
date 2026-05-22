@@ -18,11 +18,22 @@ export type PitchFilters = {
   pitcher_id?: string;
   pitcher_name?: string;
   season?: string;
+  single_game?: string;
+  start_date?: string;
+  end_date?: string;
   pitch_type?: string;
+  count?: string;
   balls?: string;
   strikes?: string;
   min_velocity?: string;
   max_velocity?: string;
+  batter_hand?: string;
+  description?: string;
+  events?: string;
+  base_state?: string;
+  location_filter?: string;
+  result_order?: string;
+  limit?: string;
 };
 
 export type PitchResult = {
@@ -30,22 +41,105 @@ export type PitchResult = {
   player_name: string | null;
   pitcher: number | null;
   batter: number | null;
+  batter_name: string | null;
+  p_throws: string | null;
+  stand: string | null;
   pitch_type: string | null;
   release_speed: number | null;
   release_spin_rate: number | null;
+  release_pos_x: number | null;
+  release_pos_z: number | null;
   pfx_x: number | null;
   pfx_z: number | null;
   plate_x: number | null;
   plate_z: number | null;
+  launch_speed: number | null;
+  launch_angle: number | null;
+  bb_type: string | null;
+  hit_distance_sc: number | null;
+  estimated_ba_using_speedangle: number | null;
+  estimated_woba_using_speedangle: number | null;
+  woba_value: number | null;
   balls: number | null;
   strikes: number | null;
   description: string | null;
   events: string | null;
+  on_1b: number | null;
+  on_2b: number | null;
+  on_3b: number | null;
+};
+
+export type CachedPitcher = {
+  pitcher: number;
+  player_name: string;
+  pitch_count: number;
+  first_game_date: string;
+  last_game_date: string;
+};
+
+export type CachedPitchersResponse = {
+  count: number;
+  results: CachedPitcher[];
+};
+
+export type PitchFilterOptions = {
+  seasons: number[];
+  game_dates: Array<{
+    game_date: string;
+    away_team: string | null;
+    home_team: string | null;
+    opponent_team: string | null;
+    pitch_count: number;
+  }>;
+  pitch_types: string[];
+  batter_hands: string[];
+  descriptions: string[];
+  events: string[];
+  velocity: {
+    min: number | null;
+    max: number | null;
+  };
 };
 
 export type PitchSearchResponse = {
   count: number;
+  total_count: number;
   results: PitchResult[];
+};
+
+export type HeatmapMode = "all" | "whiffs" | "hard_contact" | "in_zone";
+
+export type PitchHeatmapCell = {
+  x_bin: number;
+  z_bin: number;
+  x_start: number;
+  x_end: number;
+  z_start: number;
+  z_end: number;
+  count: number;
+  share: number;
+  density: number;
+  average_velocity: number | null;
+  average_exit_velocity: number | null;
+  max_exit_velocity: number | null;
+  top_pitch_type: string | null;
+  top_pitch_count: number | null;
+  top_pitch_share: number;
+};
+
+export type PitchHeatmapResponse = {
+  mode: HeatmapMode;
+  x_bins: number;
+  z_bins: number;
+  domain: {
+    x_min: number;
+    x_max: number;
+    z_min: number;
+    z_max: number;
+  };
+  total_count: number;
+  max_count: number;
+  cells: PitchHeatmapCell[];
 };
 
 export type CompareFilters = {
@@ -101,14 +195,77 @@ export type PitcherCompareResponse = {
   deltas: CompareDelta;
 };
 
-export async function searchPitches(
-  filters: PitchFilters,
-): Promise<PitchSearchResponse> {
+export type SavedComparison = {
+  id: string;
+  name: string;
+  filters: CompareFilters;
+  created_at: string;
+};
+
+async function responseError(response: Response, fallback: string) {
+  try {
+    const body = await response.json();
+    if (typeof body.detail === "string") {
+      if (body.detail.includes("Statcast parquet file not found")) {
+        return "No cached Statcast data found. Run ingestion first.";
+      }
+      return body.detail;
+    }
+  } catch {
+    return fallback;
+  }
+
+  return fallback;
+}
+
+export async function getPitchers(): Promise<CachedPitchersResponse> {
+  const response = await fetch(`${API_URL}/pitchers`);
+
+  if (!response.ok) {
+    throw new Error(await responseError(response, `Pitchers returned ${response.status}`));
+  }
+
+  return response.json();
+}
+
+export async function getPitchFilterOptions(
+  filters: PitchFilters = {},
+): Promise<PitchFilterOptions> {
   const params = new URLSearchParams();
 
   Object.entries(filters).forEach(([key, value]) => {
     const trimmedValue = value?.trim();
-    if (trimmedValue) {
+    if (
+      trimmedValue &&
+      key !== "single_game" &&
+      key !== "count" &&
+      key !== "min_velocity" &&
+      key !== "max_velocity" &&
+      key !== "result_order" &&
+      key !== "limit"
+    ) {
+      params.set(key, trimmedValue);
+    }
+  });
+
+  const queryString = params.toString();
+  const response = await fetch(
+    `${API_URL}/pitch-options${queryString ? `?${queryString}` : ""}`,
+  );
+
+  if (!response.ok) {
+    throw new Error(await responseError(response, `Pitch options returned ${response.status}`));
+  }
+
+  return response.json();
+}
+
+export async function searchPitches(filters: PitchFilters): Promise<PitchSearchResponse> {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    const trimmedValue = value?.trim();
+    if (trimmedValue && key !== "single_game" && key !== "count") {
       params.set(key, trimmedValue);
     }
   });
@@ -119,7 +276,39 @@ export async function searchPitches(
   );
 
   if (!response.ok) {
-    throw new Error(`Pitch search returned ${response.status}`);
+    throw new Error(await responseError(response, `Pitch search returned ${response.status}`));
+  }
+
+  return response.json();
+}
+
+export async function getPitchHeatmap(
+  filters: PitchFilters,
+  mode: HeatmapMode = "all",
+): Promise<PitchHeatmapResponse> {
+  const params = new URLSearchParams();
+  params.set("mode", mode);
+
+  Object.entries(filters).forEach(([key, value]) => {
+    const trimmedValue = value?.trim();
+    if (
+      trimmedValue &&
+      key !== "single_game" &&
+      key !== "count" &&
+      key !== "result_order" &&
+      key !== "limit"
+    ) {
+      params.set(key, trimmedValue);
+    }
+  });
+
+  const queryString = params.toString();
+  const response = await fetch(
+    `${API_URL}/pitches/heatmap${queryString ? `?${queryString}` : ""}`,
+  );
+
+  if (!response.ok) {
+    throw new Error(await responseError(response, `Pitch heatmap returned ${response.status}`));
   }
 
   return response.json();
@@ -140,7 +329,9 @@ export async function comparePitcher(
   const response = await fetch(`${API_URL}/compare/pitcher?${params.toString()}`);
 
   if (!response.ok) {
-    throw new Error(`Pitcher comparison returned ${response.status}`);
+    throw new Error(
+      await responseError(response, `Pitcher comparison returned ${response.status}`),
+    );
   }
 
   return response.json();

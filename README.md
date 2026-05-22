@@ -48,6 +48,23 @@ python scripts/ingest_statcast.py \
   --append
 ```
 
+Batch ingest multiple pitchers into the shared cache:
+
+```bash
+python scripts/ingest_statcast_batch.py \
+  --start-date 2024-04-01 \
+  --end-date 2024-09-30 \
+  --pitcher-name "Aaron Nola" \
+  --pitcher-name "Tarik Skubal" \
+  --output ../data/statcast.parquet
+```
+
+Set `RELAY_CORS_ORIGINS` to configure local frontend origins if needed:
+
+```powershell
+$env:RELAY_CORS_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"
+```
+
 ## Frontend
 
 Run the React frontend locally:
