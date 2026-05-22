@@ -45,6 +45,53 @@ export type PitchSearchResponse = {
   results: PitchResult[];
 };
 
+export type CompareFilters = {
+  pitcher_id: string;
+  pitcher_name: string;
+  a_start: string;
+  a_end: string;
+  b_start: string;
+  b_end: string;
+};
+
+export type PitchUsageMetric = {
+  count: number;
+  rate: number | null;
+};
+
+export type PeriodMetrics = {
+  pitch_count: number;
+  pitch_usage: Record<string, PitchUsageMetric>;
+  average_velocity: Record<string, number>;
+  strike_rate: number | null;
+  whiff_rate: number | null;
+  zone_rate: number | null;
+};
+
+export type CompareDelta = {
+  pitch_count: number;
+  pitch_usage: Record<string, PitchUsageMetric>;
+  average_velocity: Record<string, number | null>;
+  strike_rate: number | null;
+  whiff_rate: number | null;
+  zone_rate: number | null;
+};
+
+export type PitcherCompareResponse = {
+  pitcher_id: number;
+  period_a: {
+    start: string;
+    end: string;
+    metrics: PeriodMetrics;
+  };
+  period_b: {
+    start: string;
+    end: string;
+    metrics: PeriodMetrics;
+  };
+  deltas: CompareDelta;
+};
+
 export async function searchPitches(
   filters: PitchFilters,
 ): Promise<PitchSearchResponse> {
@@ -64,6 +111,27 @@ export async function searchPitches(
 
   if (!response.ok) {
     throw new Error(`Pitch search returned ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export async function comparePitcher(
+  filters: CompareFilters,
+): Promise<PitcherCompareResponse> {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    const trimmedValue = value.trim();
+    if (trimmedValue) {
+      params.set(key, trimmedValue);
+    }
+  });
+
+  const response = await fetch(`${API_URL}/compare/pitcher?${params.toString()}`);
+
+  if (!response.ok) {
+    throw new Error(`Pitcher comparison returned ${response.status}`);
   }
 
   return response.json();

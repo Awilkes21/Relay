@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.compare import router as compare_router
 from app.api.pitches import router as pitches_router
 
 app = FastAPI(title="Relay API")
@@ -17,6 +18,7 @@ app.add_middleware(
 )
 
 app.include_router(pitches_router)
+app.include_router(compare_router)
 
 
 @app.get("/health")

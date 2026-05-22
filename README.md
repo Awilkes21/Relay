@@ -33,8 +33,19 @@ Run a focused Statcast ingestion for one pitcher/date range:
 python scripts/ingest_statcast.py \
   --start-date 2024-04-01 \
   --end-date 2024-04-07 \
-  --pitcher-id 605400 \
-  --output ../data/statcast_sample.parquet
+  --pitcher-name "Aaron Nola" \
+  --output ../data/statcast.parquet
+```
+
+Append another pitcher/date range into the shared local parquet cache:
+
+```bash
+python scripts/ingest_statcast.py \
+  --start-date 2024-04-01 \
+  --end-date 2024-09-30 \
+  --pitcher-id 669373 \
+  --output ../data/statcast.parquet \
+  --append
 ```
 
 ## Frontend

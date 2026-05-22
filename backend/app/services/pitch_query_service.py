@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_STATCAST_PARQUET = (
-    Path(__file__).resolve().parents[3] / "data" / "statcast_sample.parquet"
-)
+DATA_DIR = Path(__file__).resolve().parents[3] / "data"
+DEFAULT_STATCAST_PARQUET = DATA_DIR / "statcast.parquet"
+LEGACY_STATCAST_PARQUET = DATA_DIR / "statcast_sample.parquet"
 
 
 def _build_pitch_query(filters: dict[str, Any]) -> tuple[str, list[Any]]:
@@ -89,6 +89,9 @@ def search_pitches(
         ) from exc
 
     parquet_path = Path(parquet_path)
+    if parquet_path == DEFAULT_STATCAST_PARQUET and not parquet_path.exists():
+        parquet_path = LEGACY_STATCAST_PARQUET
+
     if not parquet_path.exists():
         raise FileNotFoundError(f"Statcast parquet file not found: {parquet_path}")
 

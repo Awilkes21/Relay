@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 try:
     from fastapi.testclient import TestClient
-except ModuleNotFoundError as exc:
+except (ModuleNotFoundError, RuntimeError) as exc:
     raise unittest.SkipTest(f"FastAPI test dependencies are not installed: {exc}") from exc
 
 

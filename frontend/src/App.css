@@ -104,6 +104,31 @@ button:disabled {
   padding: 30px 0 0;
 }
 
+.view-tabs {
+  display: inline-flex;
+  gap: 4px;
+  margin-top: 22px;
+  border: 1px solid #d9dee7;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 4px;
+}
+
+.view-tab {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #4b5565;
+  font-weight: 700;
+  padding: 7px 12px;
+}
+
+.view-tab.is-active {
+  background: #1d4f7a;
+  color: #ffffff;
+}
+
 .section-heading {
   display: flex;
   align-items: baseline;
@@ -137,6 +162,10 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
+}
+
+.compare-filter-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .filter-field {
@@ -203,6 +232,99 @@ button:disabled {
 .results-header span {
   color: #687386;
   font-size: 14px;
+}
+
+.comparison-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.metric-card {
+  display: grid;
+  gap: 8px;
+  min-height: 88px;
+  border: 1px solid #d9dee7;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 14px;
+}
+
+.metric-card span {
+  color: #687386;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.metric-card strong {
+  align-self: end;
+  color: #151b26;
+  font-size: 22px;
+}
+
+.comparison-panels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.comparison-panel {
+  border: 1px solid #d9dee7;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 18px;
+}
+
+.comparison-panel h3 {
+  margin: 0;
+  color: #151b26;
+  font-size: 18px;
+}
+
+.comparison-panel p {
+  margin: 6px 0 14px;
+  color: #687386;
+  font-size: 14px;
+}
+
+.summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-top: 1px solid #e6eaf0;
+  padding: 9px 0;
+}
+
+.summary-row span {
+  color: #596273;
+}
+
+.summary-row strong {
+  color: #151b26;
+}
+
+.mini-table {
+  min-width: 0;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.mini-table th,
+.mini-table td {
+  padding: 8px 6px;
+}
+
+.comparison-table {
+  min-width: 820px;
+}
+
+.bordered-empty {
+  border: 1px solid #d9dee7;
+  border-radius: 8px;
 }
 
 .chart-panel {
@@ -353,6 +475,12 @@ tbody tr:last-child td {
   }
 
   .filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .compare-filter-grid,
+  .comparison-summary,
+  .comparison-panels {
     grid-template-columns: 1fr;
   }
 
