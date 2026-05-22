@@ -216,3 +216,36 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Personal
+relay_project_design_overview.md
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/*.log
+
+# Frontend env
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.production.local
+
+# Vite
+frontend/.vite/
+
+# TypeScript
+frontend/*.tsbuildinfo
+
+# Optional package manager files/directories
+frontend/.pnpm-store/
+frontend/.npm/
+
+# macOS
+.DS_Store
+
+# Data
+data/raw/
+data/processed/
+data/*.parquet
+data/*.db
