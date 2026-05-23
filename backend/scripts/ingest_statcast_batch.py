@@ -6,7 +6,15 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ingest_statcast import fetch_statcast_pitcher, resolve_pitcher_id, save_parquet
+from ingest_statcast import (
+    GAME_TYPE_CHOICES,
+    fetch_statcast_pitcher,
+    filter_game_types,
+    game_type_summary,
+    resolve_pitcher_id,
+    save_parquet,
+    selected_game_types,
+)
 from statcast_provider import get_statcast_provider
 
 
@@ -57,6 +65,25 @@ def parse_args() -> argparse.Namespace:
         default="pybaseball",
         help="Statcast data provider implementation.",
     )
+    parser.add_argument(
+        "--game-type",
+        action="append",
+        choices=GAME_TYPE_CHOICES,
+        help=(
+            "MLB game_type code to keep. Defaults to R regular-season games. "
+            "Pass multiple times for multiple types."
+        ),
+    )
+    parser.add_argument(
+        "--include-spring-training",
+        action="store_true",
+        help="Include spring training games in addition to the selected game types.",
+    )
+    parser.add_argument(
+        "--all-game-types",
+        action="store_true",
+        help="Keep every game_type returned by the provider.",
+    )
     return parser.parse_args()
 
 
@@ -101,6 +128,8 @@ def summarize_dataframe(dataframe: Any, pitcher_id: int, requested_name: str | N
             for pitch_type in dataframe["pitch_type"].dropna().unique()
             if is_known_pitch_type(pitch_type)
         )
+    if "game_type" in dataframe.columns:
+        summary["game_types"] = sorted(str(value) for value in dataframe["game_type"].dropna().unique())
 
     return summary
 
@@ -132,6 +161,17 @@ def summarize_parquet(output_path: Path) -> dict[str, Any]:
         pitch_types = connection.execute(
             f"SELECT DISTINCT pitch_type FROM {STATCAST_VIEW_NAME} ORDER BY pitch_type"
         ).fetchall()
+        game_types = (
+            [
+                str(game_type)
+                for (game_type,) in connection.execute(
+                    f"SELECT DISTINCT game_type FROM {STATCAST_VIEW_NAME} "
+                    "WHERE game_type IS NOT NULL ORDER BY game_type"
+                ).fetchall()
+            ]
+            if "game_type" in columns
+            else []
+        )
         seasons = (
             [
                 int(season)
@@ -163,6 +203,7 @@ def summarize_parquet(output_path: Path) -> dict[str, Any]:
             for pitcher_id, player_name, row_count, first_game_date, last_game_date in pitchers
         ],
         "pitch_types": [pitch_type for (pitch_type,) in pitch_types],
+        "game_types": game_types,
         "data_quality": quality,
     }
 
@@ -179,6 +220,7 @@ def build_manifest(
     end_date: date,
     ingestion_results: list[dict[str, Any]],
     replace: bool,
+    game_types: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     cache_summary = summarize_parquet(output_path)
     return {
@@ -189,6 +231,7 @@ def build_manifest(
             "start": start_date.isoformat(),
             "end": end_date.isoformat(),
         },
+        "game_types": list(game_types) if game_types is not None else "all",
         "replace": replace,
         "ingestion_results": ingestion_results,
         "cache": cache_summary,
@@ -211,6 +254,7 @@ def main() -> int:
     pitcher_ids = list(args.pitcher_id)
     ingestion_results: list[dict[str, Any]] = []
     provider = get_statcast_provider(args.provider)
+    game_types = selected_game_types(args)
 
     try:
         if args.index_only:
@@ -218,6 +262,7 @@ def main() -> int:
         else:
             requested_names_by_id: dict[int, str] = {}
             LOGGER.info("provider: %s", args.provider)
+            LOGGER.info("game types: %s", game_type_summary(game_types))
             for pitcher_name in args.pitcher_name:
                 LOGGER.info("resolving pitcher name: %s", pitcher_name)
                 resolved_pitcher_id = resolve_pitcher_id(pitcher_name, provider)
@@ -234,12 +279,17 @@ def main() -> int:
                         pitcher_id,
                         provider,
                     )
+                    LOGGER.info("fetched row count: %s", len(data))
+                    data = filter_game_types(data, game_types)
                     pitcher_summary = summarize_dataframe(
                         data,
                         pitcher_id,
                         requested_name=requested_names_by_id.get(pitcher_id),
                     )
-                    LOGGER.info("fetched row count: %s", pitcher_summary["row_count"])
+                    LOGGER.info(
+                        "kept row count after game_type filter: %s",
+                        pitcher_summary["row_count"],
+                    )
                     saved_count = save_parquet(
                         data,
                         output_path,
@@ -268,6 +318,7 @@ def main() -> int:
             args.end_date,
             ingestion_results,
             replace=args.replace,
+            game_types=game_types,
         )
         write_manifest(manifest_path, manifest)
 

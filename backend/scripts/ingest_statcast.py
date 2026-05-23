@@ -12,6 +12,17 @@ from statcast_provider import (
 
 
 LOGGER = logging.getLogger("relay.ingest_statcast")
+DEFAULT_GAME_TYPES = ("R",)
+SPRING_TRAINING_GAME_TYPE = "S"
+GAME_TYPE_CHOICES = ("R", "S", "F", "D", "L", "W")
+GAME_TYPE_LABELS = {
+    "R": "regular season",
+    "S": "spring training",
+    "F": "wild card",
+    "D": "division series",
+    "L": "league championship",
+    "W": "world series",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,6 +66,25 @@ def parse_args() -> argparse.Namespace:
         default="pybaseball",
         help="Statcast data provider implementation.",
     )
+    parser.add_argument(
+        "--game-type",
+        action="append",
+        choices=GAME_TYPE_CHOICES,
+        help=(
+            "MLB game_type code to keep. Defaults to R regular-season games. "
+            "Pass multiple times for multiple types."
+        ),
+    )
+    parser.add_argument(
+        "--include-spring-training",
+        action="store_true",
+        help="Include spring training games in addition to the selected game types.",
+    )
+    parser.add_argument(
+        "--all-game-types",
+        action="store_true",
+        help="Keep every game_type returned by the provider.",
+    )
     args = parser.parse_args()
     if args.pitcher_id is None and not args.pitcher_name:
         parser.error("one of --pitcher-id or --pitcher-name is required")
@@ -77,6 +107,33 @@ def fetch_statcast_pitcher(
 ):
     statcast_provider = provider or get_statcast_provider()
     return statcast_provider.fetch_pitcher_pitches(start_date, end_date, pitcher_id)
+
+
+def selected_game_types(args: argparse.Namespace) -> tuple[str, ...] | None:
+    if args.all_game_types:
+        return None
+
+    game_types = list(args.game_type or DEFAULT_GAME_TYPES)
+    if args.include_spring_training:
+        game_types.append(SPRING_TRAINING_GAME_TYPE)
+    return tuple(dict.fromkeys(game_types))
+
+
+def filter_game_types(dataframe, game_types: tuple[str, ...] | None):
+    if game_types is None:
+        return dataframe
+    if "game_type" not in dataframe.columns:
+        LOGGER.warning(
+            "game_type column missing from provider data; keeping all fetched rows"
+        )
+        return dataframe
+    return dataframe[dataframe["game_type"].isin(game_types)].copy()
+
+
+def game_type_summary(game_types: tuple[str, ...] | None) -> str:
+    if game_types is None:
+        return "all"
+    return ", ".join(f"{game_type} ({GAME_TYPE_LABELS.get(game_type, 'unknown')})" for game_type in game_types)
 
 
 def save_parquet(dataframe, output_path: Path, append: bool = False) -> int:
@@ -161,10 +218,12 @@ def main() -> int:
     output_path = Path(args.output)
     pitcher_id = args.pitcher_id
     provider = get_statcast_provider(args.provider)
+    game_types = selected_game_types(args)
 
     LOGGER.info("date range: %s to %s", args.start_date, args.end_date)
     LOGGER.info("append mode: %s", args.append)
     LOGGER.info("provider: %s", args.provider)
+    LOGGER.info("game types: %s", game_type_summary(game_types))
 
     try:
         if pitcher_id is None:
@@ -175,6 +234,8 @@ def main() -> int:
 
         data = fetch_statcast_pitcher(args.start_date, args.end_date, pitcher_id, provider)
         LOGGER.info("fetched row count: %s", len(data))
+        data = filter_game_types(data, game_types)
+        LOGGER.info("kept row count after game_type filter: %s", len(data))
 
         saved_row_count = save_parquet(data, output_path, append=args.append)
         LOGGER.info("saved row count: %s", saved_row_count)

@@ -65,6 +65,11 @@ function formatNumber(value: number | null | undefined, digits = 1) {
   return value === null || value === undefined ? "-" : value.toFixed(digits);
 }
 
+function compactPeriodLabel(label: string) {
+  const match = label.match(/^Period\s+([AB12])/i);
+  return match ? `P${match[1].toUpperCase()}` : label;
+}
+
 function scaleFromCenter(value: number, center: number, radius: number, domainMax: number) {
   return center + (value / domainMax) * radius;
 }
@@ -191,6 +196,8 @@ function CompareMovementChart({
   const [selectedPitchType, setSelectedPitchType] = useState<string | null>(null);
   const [hoveredPitchType, setHoveredPitchType] = useState<string | null>(null);
   const [chartMode, setChartMode] = useState<ChartMode>("overlay");
+  const periodACompactLabel = compactPeriodLabel(periodALabel);
+  const periodBCompactLabel = compactPeriodLabel(periodBLabel);
   const sideLabels = horizontalSideLabels(comparison.pitcher_hand);
   const movementPairs = useMemo(
     () =>
@@ -275,8 +282,8 @@ function CompareMovementChart({
   }
 
   function tooltipPosition(point: { x: number; y: number }) {
-    const tooltipWidth = 220;
-    const tooltipHeight = 112;
+    const tooltipWidth = 190;
+    const tooltipHeight = 108;
 
     return {
       x: Math.min(Math.max(point.x + 14, 24), width - 24 - tooltipWidth),
@@ -307,10 +314,10 @@ function CompareMovementChart({
         <text className="chart-tooltip-title" x="12" y="21">
           {formatPitchType(pair.pitchType)}
         </text>
-        <text x="12" y="45">{periodALabel}: {pair.a?.count ?? 0} pitches, {formatNumber(pair.a?.horizontalBreak)} HB</text>
-        <text x="12" y="64">{periodBLabel}: {pair.b?.count ?? 0} pitches, {formatNumber(pair.b?.horizontalBreak)} HB</text>
-        <text x="12" y="83">Shape change {formatNumber(pair.distance)}" | IVB {formatNumber(pair.b?.inducedVerticalBreak)}</text>
-        <text x="12" y="102">Click to pin this pitch type</text>
+        <text x="12" y="43">{periodACompactLabel}: {pair.a?.count ?? 0} pitches | HB {formatNumber(pair.a?.horizontalBreak)}</text>
+        <text x="12" y="61">{periodBCompactLabel}: {pair.b?.count ?? 0} pitches | HB {formatNumber(pair.b?.horizontalBreak)}</text>
+        <text x="12" y="79">Move {formatNumber(pair.distance)}" | IVB {formatNumber(pair.b?.inducedVerticalBreak)}</text>
+        <text x="12" y="97">Click to pin</text>
       </g>
     );
   }
@@ -487,21 +494,42 @@ function CompareMovementChart({
         <span>{movementPairs.length} pitch types | period averages</span>
       </div>
 
-      <div className="chart-tools">
-        <span className="chart-view-note">
-          {sideLabels.left} / {sideLabels.right} | {periodBLabel} minus {periodALabel}
-        </span>
-        <div className="chart-controls">
+      <div className="strike-zone-toolbar movement-toolbar">
+        <div className="strike-zone-toolbar-row">
+          <span className="chart-view-note strike-zone-orientation">
+            {sideLabels.left} / {sideLabels.right} | {periodBCompactLabel} minus {periodACompactLabel}
+          </span>
           {largestMover ? (
             <span className="movement-mover-callout">
-              Biggest mover: {formatPitchType(largestMover.pitchType)} {formatNumber(largestMover.distance)}"
+              Move: {formatPitchType(largestMover.pitchType)} {formatNumber(largestMover.distance)}"
             </span>
           ) : null}
-          <div className="movement-period-legend" aria-label="Movement period legend">
-            <span><i className="movement-period-dot movement-period-dot--a" />{periodALabel}</span>
-            <span><i className="movement-period-dot movement-period-dot--b" />{periodBLabel}</span>
+          <div className="lens-group">
+            <span className="lens-label">View</span>
+            <div className="zoom-controls" aria-label="Movement diff view">
+              <button
+                className={chartMode === "overlay" ? "zoom-button is-active" : "zoom-button"}
+                onClick={() => setChartMode("overlay")}
+                type="button"
+              >
+                Overlay
+              </button>
+              <button
+                className={chartMode === "side_by_side" ? "zoom-button is-active" : "zoom-button"}
+                onClick={() => setChartMode("side_by_side")}
+                type="button"
+              >
+                A/B
+              </button>
+            </div>
           </div>
-          <div className="pitch-legend movement-pitch-legend" aria-label="Pitch type colors">
+        </div>
+        <div className="strike-zone-toolbar-row strike-zone-toolbar-row--secondary">
+          <div className="movement-period-legend" aria-label="Movement period legend">
+            <span title={periodALabel}><i className="movement-period-dot movement-period-dot--a" />{periodACompactLabel}</span>
+            <span title={periodBLabel}><i className="movement-period-dot movement-period-dot--b" />{periodBCompactLabel}</span>
+          </div>
+          <div className="pitch-legend movement-pitch-legend strike-zone-legend" aria-label="Pitch type colors">
             {movementPairs.map((pair) => (
               <span className="legend-item" key={pair.pitchType}>
                 <i
@@ -511,22 +539,6 @@ function CompareMovementChart({
                 {formatPitchType(pair.pitchType)}
               </span>
             ))}
-          </div>
-          <div className="zoom-controls" aria-label="Movement diff view">
-            <button
-              className={chartMode === "overlay" ? "zoom-button is-active" : "zoom-button"}
-              onClick={() => setChartMode("overlay")}
-              type="button"
-            >
-              Overlay
-            </button>
-            <button
-              className={chartMode === "side_by_side" ? "zoom-button is-active" : "zoom-button"}
-              onClick={() => setChartMode("side_by_side")}
-              type="button"
-            >
-              Side by side
-            </button>
           </div>
         </div>
       </div>

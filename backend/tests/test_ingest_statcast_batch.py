@@ -37,12 +37,14 @@ class IngestStatcastBatchTests(unittest.TestCase):
                     "player_name": "Nola, Aaron",
                     "game_date": "2024-04-01",
                     "pitch_type": "FF",
+                    "game_type": "R",
                 },
                 {
                     "pitcher": 605400,
                     "player_name": "Nola, Aaron",
                     "game_date": "2024-04-02",
                     "pitch_type": "UN",
+                    "game_type": "S",
                 },
             ]
         )
@@ -54,6 +56,7 @@ class IngestStatcastBatchTests(unittest.TestCase):
         self.assertEqual(summary["row_count"], 2)
         self.assertEqual(summary["player_name"], "Nola, Aaron")
         self.assertEqual(summary["pitch_types"], ["FF"])
+        self.assertEqual(summary["game_types"], ["R", "S"])
 
     def test_summarize_parquet_indexes_cache(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -61,13 +64,13 @@ class IngestStatcastBatchTests(unittest.TestCase):
             duckdb.connect().execute(
                 "COPY ("
                 "SELECT 605400 AS pitcher, 'Nola, Aaron' AS player_name, "
-                "DATE '2024-04-01' AS game_date, 'FF' AS pitch_type "
+                "DATE '2024-04-01' AS game_date, 'FF' AS pitch_type, 'R' AS game_type "
                 "UNION ALL "
                 "SELECT 605400 AS pitcher, 'Nola, Aaron' AS player_name, "
-                "DATE '2024-04-02' AS game_date, 'UN' AS pitch_type "
+                "DATE '2024-04-02' AS game_date, 'UN' AS pitch_type, 'R' AS game_type "
                 "UNION ALL "
                 "SELECT 669373 AS pitcher, 'Skubal, Tarik' AS player_name, "
-                "DATE '2024-04-03' AS game_date, 'SL' AS pitch_type"
+                "DATE '2024-04-03' AS game_date, 'SL' AS pitch_type, 'S' AS game_type"
                 f") TO '{parquet_path.as_posix()}' (FORMAT PARQUET)"
             )
 
@@ -77,6 +80,7 @@ class IngestStatcastBatchTests(unittest.TestCase):
         self.assertEqual(summary["row_count"], 2)
         self.assertEqual(summary["pitcher_count"], 2)
         self.assertEqual(summary["pitch_types"], ["FF", "SL"])
+        self.assertEqual(summary["game_types"], ["R", "S"])
         self.assertEqual(
             [(pitcher["pitcher_id"], pitcher["row_count"]) for pitcher in summary["pitchers"]],
             [(605400, 1), (669373, 1)],
@@ -101,12 +105,14 @@ class IngestStatcastBatchTests(unittest.TestCase):
                 date(2024, 4, 30),
                 [{"pitcher_id": 605400, "row_count": 1, "status": "ok"}],
                 replace=False,
+                game_types=("R",),
             )
             write_manifest(manifest_path, manifest)
 
             self.assertTrue(manifest_path.exists())
             self.assertEqual(manifest["cache"]["row_count"], 1)
             self.assertEqual(manifest["date_range"]["start"], "2024-04-01")
+            self.assertEqual(manifest["game_types"], ["R"])
             self.assertIn("data_quality", manifest["cache"])
 
 

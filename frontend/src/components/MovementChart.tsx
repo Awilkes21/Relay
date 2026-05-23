@@ -211,12 +211,21 @@ function MovementChart({ pitches }: MovementChartProps) {
         <span>{plottedPitches.length} plotted pitches | pitcher view</span>
       </div>
 
-      <div className="chart-tools">
-        <span className="chart-view-note">
-          {sideLabels.left} / {sideLabels.right} | Rise / Drop
-        </span>
-        <div className="chart-controls">
-          <div className="pitch-legend movement-pitch-legend" aria-label="Pitch type colors">
+      <div className="strike-zone-toolbar movement-toolbar">
+        <div className="strike-zone-toolbar-row">
+          <span className="chart-view-note strike-zone-orientation">
+            {sideLabels.left} / {sideLabels.right} | Rise / Drop
+          </span>
+          <button
+            className="secondary-button"
+            onClick={() => setIsExpanded((current) => !current)}
+            type="button"
+          >
+            {isExpanded ? "Collapse" : "Expand"}
+          </button>
+        </div>
+        <div className="strike-zone-toolbar-row strike-zone-toolbar-row--secondary">
+          <div className="pitch-legend movement-pitch-legend strike-zone-legend" aria-label="Pitch type colors">
             {plottedPitchTypes.map((pitchType) => (
               <span className="legend-item" key={pitchType}>
                 <i
@@ -227,13 +236,6 @@ function MovementChart({ pitches }: MovementChartProps) {
               </span>
             ))}
           </div>
-          <button
-            className="secondary-button"
-            onClick={() => setIsExpanded((current) => !current)}
-            type="button"
-          >
-            {isExpanded ? "Collapse" : "Expand"}
-          </button>
         </div>
       </div>
 

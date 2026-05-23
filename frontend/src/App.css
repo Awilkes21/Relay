@@ -1039,6 +1039,57 @@ button:disabled {
   min-height: 32px;
 }
 
+.strike-zone-toolbar {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+  border: 1px solid var(--relay-border-soft);
+  border-radius: 10px;
+  background: var(--relay-surface-soft);
+  padding: 10px;
+}
+
+.movement-toolbar {
+  margin-top: 2px;
+}
+
+.strike-zone-toolbar-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.strike-zone-toolbar-row--secondary {
+  justify-content: space-between;
+  border-top: 1px solid var(--relay-border-soft);
+  padding-top: 8px;
+}
+
+.strike-zone-orientation {
+  margin-right: auto;
+}
+
+.lens-group {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lens-label {
+  color: var(--relay-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.strike-zone-legend {
+  flex: 1 1 280px;
+  min-height: auto;
+}
+
 .heatmap-tools {
   display: flex;
   flex-wrap: wrap;
@@ -1175,6 +1226,25 @@ button:disabled {
   font-weight: 700;
 }
 
+.strike-zone-legend .legend-item {
+  font-size: 12px;
+}
+
+.legend-button {
+  min-height: 28px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  padding: 4px 8px;
+}
+
+.legend-button:hover,
+.legend-button.is-active {
+  border-color: var(--relay-border);
+  background: var(--relay-primary-soft);
+  color: var(--relay-primary);
+}
+
 .legend-swatch {
   width: 11px;
   height: 11px;
@@ -1211,6 +1281,19 @@ button:disabled {
   font-weight: 700;
 }
 
+.strike-zone-toolbar .zoom-button {
+  min-width: 0;
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.strike-zone-toolbar .secondary-button {
+  min-height: 34px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
 .zoom-button.is-active {
   background: var(--relay-primary);
   color: #ffffff;
@@ -1218,6 +1301,12 @@ button:disabled {
 
 :root[data-theme="dark"] .zoom-button.is-active {
   color: #07111d;
+}
+
+.secondary-button.is-active {
+  border-color: var(--relay-primary);
+  background: var(--relay-primary-soft);
+  color: var(--relay-primary);
 }
 
 .strike-zone-frame {
@@ -1338,9 +1427,9 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 8px;
   color: var(--relay-muted);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -1371,7 +1460,13 @@ button:disabled {
   color: var(--relay-text);
   font-size: 13px;
   font-weight: 800;
+  max-width: 220px;
   overflow-wrap: anywhere;
+}
+
+.movement-toolbar .movement-mover-callout {
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .compare-movement-pair {
@@ -1510,6 +1605,36 @@ button:disabled {
 
 :root[data-theme="dark"] .strike-zone-box {
   fill: rgba(98, 168, 220, 0.08);
+}
+
+.zone-density-cell {
+  fill: var(--relay-primary);
+  pointer-events: none;
+}
+
+.zone-bucket {
+  cursor: pointer;
+  fill: transparent;
+  stroke: var(--relay-border);
+  stroke-dasharray: 3 4;
+  stroke-width: 1;
+  transition:
+    fill 140ms ease,
+    stroke 140ms ease,
+    stroke-width 140ms ease;
+}
+
+.zone-bucket:hover,
+.zone-bucket.is-selected {
+  fill: rgba(23, 79, 120, 0.08);
+  stroke: var(--relay-primary);
+  stroke-dasharray: none;
+  stroke-width: 2;
+}
+
+:root[data-theme="dark"] .zone-bucket:hover,
+:root[data-theme="dark"] .zone-bucket.is-selected {
+  fill: rgba(98, 168, 220, 0.12);
 }
 
 .pitch-point {

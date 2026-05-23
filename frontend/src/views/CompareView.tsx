@@ -210,6 +210,27 @@ function CompareView({ hidden, context }: CompareViewProps) {
                 >
                   First Month vs Second Month
                 </button>
+                <button
+                  disabled={!hasComparePresetRange("latest_month_previous_month", compareDateRange)}
+                  type="button"
+                  onClick={() => setComparePreset("latest_month_previous_month")}
+                >
+                  Previous Month vs Latest Month
+                </button>
+                <button
+                  disabled={!hasComparePresetRange("previous_current_season", compareDateRange)}
+                  type="button"
+                  onClick={() => setComparePreset("previous_current_season")}
+                >
+                  Previous Season vs Current Season
+                </button>
+                <button
+                  disabled={!hasComparePresetRange("previous_current_same_span", compareDateRange)}
+                  type="button"
+                  onClick={() => setComparePreset("previous_current_same_span")}
+                >
+                  Prior Season Same Span
+                </button>
               </div>
               <div className="compare-period-layout">
                 {(["a", "b"] as const).map((periodKey) => {

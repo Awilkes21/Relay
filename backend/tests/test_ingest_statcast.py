@@ -15,7 +15,7 @@ except ModuleNotFoundError as exc:
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR / "scripts"))
 
-from ingest_statcast import parse_pitcher_name, save_parquet
+from ingest_statcast import filter_game_types, parse_pitcher_name, save_parquet
 from ingest_statcast import fetch_statcast_pitcher, resolve_pitcher_id
 
 
@@ -51,6 +51,30 @@ class IngestStatcastTests(unittest.TestCase):
         self.assertEqual(provider.resolved_pitcher_name, "Aaron Nola")
         self.assertEqual(provider.fetch_args, (date(2024, 4, 1), date(2024, 4, 2), 605400))
         self.assertEqual(len(data), 1)
+
+    def test_filter_game_types_defaults_to_regular_season(self):
+        data = pd.DataFrame(
+            [
+                {"game_type": "R", "pitcher": 605400},
+                {"game_type": "S", "pitcher": 605400},
+            ]
+        )
+
+        filtered = filter_game_types(data, ("R",))
+
+        self.assertEqual(filtered["game_type"].tolist(), ["R"])
+
+    def test_filter_game_types_can_include_spring_training(self):
+        data = pd.DataFrame(
+            [
+                {"game_type": "R", "pitcher": 605400},
+                {"game_type": "S", "pitcher": 605400},
+            ]
+        )
+
+        filtered = filter_game_types(data, ("R", "S"))
+
+        self.assertEqual(filtered["game_type"].tolist(), ["R", "S"])
 
     def test_append_merges_and_dedupes_shared_cache(self):
         with tempfile.TemporaryDirectory() as temp_dir:

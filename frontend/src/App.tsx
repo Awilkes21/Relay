@@ -27,7 +27,17 @@ import "./App.css";
 type BackendStatus = "checking" | "connected" | "error";
 type ActiveView = "explorer" | "compare";
 type ThemeMode = "light" | "dark";
-type ComparePreset = "first_second" | "last30_previous30" | "month_month";
+type ComparePreset =
+  | "first_second"
+  | "last30_previous30"
+  | "month_month"
+  | "latest_month_previous_month"
+  | "previous_current_season"
+  | "previous_current_same_span";
+type DateRange = {
+  start: Date;
+  end: Date;
+};
 type SortDirection = "asc" | "desc";
 type PitchSortKey =
   | "game_date"
@@ -456,6 +466,10 @@ function startOfNextMonth(date: Date) {
   return new Date(date.getFullYear(), date.getMonth() + 1, 1);
 }
 
+function compareDateAsc(a: Date, b: Date) {
+  return a.getTime() - b.getTime();
+}
+
 function collectPitchTypes(comparison: PitcherCompareResponse) {
   return Array.from(
     new Set([
@@ -744,6 +758,85 @@ function App() {
     return selectedComparePitcher() ?? bestPitcherNameMatch(compareFilters.pitcher_name);
   }
 
+  function compareCachedDates() {
+    return Array.from(
+      new Set(compareOptions.game_dates.map((game) => game.game_date).filter(Boolean)),
+    )
+      .map(dateFromIso)
+      .sort(compareDateAsc);
+  }
+
+  function compareSeasonRanges() {
+    const bySeason = new Map<number, Date[]>();
+    compareCachedDates().forEach((date) => {
+      const season = date.getFullYear();
+      bySeason.set(season, [...(bySeason.get(season) ?? []), date]);
+    });
+
+    return Array.from(bySeason.entries())
+      .map(([season, dates]) => {
+        const sortedDates = dates.sort(compareDateAsc);
+        return {
+          season,
+          start: sortedDates[0],
+          end: sortedDates.at(-1)!,
+          gameCount: sortedDates.length,
+        };
+      })
+      .sort((a, b) => a.season - b.season);
+  }
+
+  function latestTwoSeasonRanges() {
+    const ranges = compareSeasonRanges();
+    if (ranges.length < 2) return null;
+    return {
+      previous: ranges.at(-2)!,
+      current: ranges.at(-1)!,
+    };
+  }
+
+  function compareMonthRanges() {
+    const byMonth = new Map<string, Date[]>();
+    compareCachedDates().forEach((date) => {
+      byMonth.set(monthKey(date), [...(byMonth.get(monthKey(date)) ?? []), date]);
+    });
+
+    return Array.from(byMonth.entries())
+      .map(([key, dates]) => {
+        const sortedDates = dates.sort(compareDateAsc);
+        return {
+          key,
+          start: sortedDates[0],
+          end: sortedDates.at(-1)!,
+          gameCount: sortedDates.length,
+        };
+      })
+      .sort((a, b) => a.start.getTime() - b.start.getTime());
+  }
+
+  function comparePresetError(preset: ComparePreset) {
+    if (preset === "first_second") {
+      return "This pitcher needs at least two cached dates for a first-half comparison.";
+    }
+    if (preset === "month_month" || preset === "latest_month_previous_month") {
+      return "This pitcher needs cached data in at least two calendar months for this preset.";
+    }
+    if (preset === "previous_current_season" || preset === "previous_current_same_span") {
+      return "This pitcher needs cached data in at least two seasons for this preset.";
+    }
+    return "This pitcher needs at least 60 cached dates for this 30-day preset.";
+  }
+
+  function applyComparePresetRange(periodA: DateRange, periodB: DateRange) {
+    setCompareFilters((current) => ({
+      ...current,
+      a_start: isoDate(periodA.start),
+      a_end: isoDate(periodA.end),
+      b_start: isoDate(periodB.start),
+      b_end: isoDate(periodB.end),
+    }));
+  }
+
   function bestPitcherNameMatch(pitcherName: string) {
     const query = pitcherName.trim().toLowerCase();
     if (!query) return null;
@@ -829,6 +922,13 @@ function App() {
     );
     if (preset === "first_second") return days >= 2;
     if (preset === "month_month") return monthKey(first) !== monthKey(last);
+    if (preset === "latest_month_previous_month") return compareMonthRanges().length >= 2;
+    if (preset === "previous_current_season") return latestTwoSeasonRanges() !== null;
+    if (preset === "previous_current_same_span") {
+      const ranges = latestTwoSeasonRanges();
+      if (!ranges) return false;
+      return ranges.previous.gameCount > 0 && ranges.current.gameCount > 0;
+    }
     return days >= 60;
   }
 
@@ -839,13 +939,7 @@ function App() {
       return;
     }
     if (!hasComparePresetRange(preset, pitcher)) {
-      setCompareError(
-        preset === "first_second"
-          ? "This pitcher needs at least two cached dates for a first-half comparison."
-          : preset === "month_month"
-            ? "This pitcher needs cached data in at least two calendar months for this preset."
-            : "This pitcher needs at least 60 cached dates for this 30-day preset.",
-      );
+      setCompareError(comparePresetError(preset));
       return;
     }
 
@@ -858,35 +952,33 @@ function App() {
       const periodADays = Math.floor(days / 2);
       const aEnd = addDays(first, periodADays - 1);
       const bStart = addDays(aEnd, 1);
-      setCompareFilters((current) => ({
-        ...current,
-        a_start: isoDate(first),
-        a_end: isoDate(aEnd),
-        b_start: isoDate(bStart),
-        b_end: isoDate(last),
-      }));
+      applyComparePresetRange({ start: first, end: aEnd }, { start: bStart, end: last });
     } else if (preset === "last30_previous30") {
       const bStart = addDays(last, -29);
       const aEnd = addDays(bStart, -1);
       const aStart = addDays(aEnd, -29);
-      setCompareFilters((current) => ({
-        ...current,
-        a_start: isoDate(aStart),
-        a_end: isoDate(aEnd),
-        b_start: isoDate(bStart),
-        b_end: isoDate(last),
-      }));
-    } else {
+      applyComparePresetRange({ start: aStart, end: aEnd }, { start: bStart, end: last });
+    } else if (preset === "month_month") {
       const aEnd = endOfMonth(first);
       const bStart = startOfNextMonth(first);
       const bEnd = endOfMonth(bStart) > last ? last : endOfMonth(bStart);
-      setCompareFilters((current) => ({
-        ...current,
-        a_start: isoDate(first),
-        a_end: isoDate(aEnd),
-        b_start: isoDate(bStart),
-        b_end: isoDate(bEnd),
-      }));
+      applyComparePresetRange({ start: first, end: aEnd }, { start: bStart, end: bEnd });
+    } else if (preset === "latest_month_previous_month") {
+      const months = compareMonthRanges();
+      const previous = months.at(-2)!;
+      const current = months.at(-1)!;
+      applyComparePresetRange(previous, current);
+    } else if (preset === "previous_current_season") {
+      const ranges = latestTwoSeasonRanges()!;
+      applyComparePresetRange(ranges.previous, ranges.current);
+    } else {
+      const ranges = latestTwoSeasonRanges()!;
+      const currentDays = inclusiveDayCount(ranges.current.start, ranges.current.end);
+      const previousEnd = addDays(ranges.previous.start, currentDays - 1);
+      applyComparePresetRange(
+        { start: ranges.previous.start, end: previousEnd > ranges.previous.end ? ranges.previous.end : previousEnd },
+        ranges.current,
+      );
     }
   }
 

@@ -11,6 +11,36 @@ type PlottedPitch = PitchResult & {
   plate_z: number;
 };
 
+type PlotDomain = {
+  xMin: number;
+  xMax: number;
+  zMin: number;
+  zMax: number;
+};
+
+type ColorMode = "pitch" | "result" | "contact";
+type CountFilter = "all" | "ahead" | "even" | "behind" | "two_strikes" | "full";
+type DensityMode = "off" | "on";
+type Bucket = {
+  column: number;
+  row: number;
+  label: string;
+  xMin: number;
+  xMax: number;
+  zMin: number;
+  zMax: number;
+};
+type BucketSummary = {
+  bucket: Bucket;
+  pitches: PlottedPitch[];
+  count: number;
+  share: number;
+  strikeRate: number | null;
+  whiffRate: number | null;
+  averageExitVelocity: number | null;
+  topPitchType: string | null;
+};
+
 const width = 560;
 const height = 460;
 const padding = 46;
@@ -36,6 +66,22 @@ const pitchColors: Record<string, string> = {
   FS: "#4b5565",
 };
 
+const resultColors: Record<string, string> = {
+  ball: "#8b95a6",
+  strike: "#1d4f7a",
+  whiff: "#b33a31",
+  foul: "#9a6a20",
+  in_play: "#287271",
+  hit_by_pitch: "#7b4ea3",
+};
+
+const contactColors: Record<string, string> = {
+  hard: "#b33a31",
+  medium: "#b5651d",
+  soft: "#287271",
+  no_contact: "#7f92a8",
+};
+
 const descriptionLabels: Record<string, string> = {
   ball: "Ball",
   called_strike: "Called Strike",
@@ -52,6 +98,35 @@ const descriptionLabels: Record<string, string> = {
   hit_into_play_score: "Ball In Play, Run Scores",
 };
 
+const colorModes: Array<{ value: ColorMode; label: string }> = [
+  { value: "pitch", label: "Pitch" },
+  { value: "result", label: "Result" },
+  { value: "contact", label: "Contact" },
+];
+
+const countFilters: Array<{ value: CountFilter; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "ahead", label: "Ahead" },
+  { value: "even", label: "Even" },
+  { value: "behind", label: "Behind" },
+  { value: "two_strikes", label: "2K" },
+  { value: "full", label: "Full" },
+];
+
+const whiffDescriptions = new Set(["swinging_strike", "swinging_strike_blocked"]);
+const strikeDescriptions = new Set([
+  "called_strike",
+  "swinging_strike",
+  "swinging_strike_blocked",
+  "foul",
+  "foul_tip",
+  "foul_bunt",
+  "missed_bunt",
+  "hit_into_play",
+  "hit_into_play_no_out",
+  "hit_into_play_score",
+]);
+
 function scaleX(value: number, domain: PlotDomain) {
   return (
     padding +
@@ -67,16 +142,12 @@ function scaleZ(value: number, domain: PlotDomain) {
   );
 }
 
-function pitchColor(pitchType: string | null) {
-  return pitchType ? pitchColors[pitchType] ?? "#2f6f9f" : "#7f92a8";
-}
-
 function pitcherViewX(plateX: number) {
   return plateX * -1;
 }
 
-function formatDetail(value: string | number | null) {
-  return value ?? "-";
+function pitchColor(pitchType: string | null) {
+  return pitchType ? pitchColors[pitchType] ?? "#2f6f9f" : "#7f92a8";
 }
 
 function titleCaseCode(value: string | null | undefined) {
@@ -86,6 +157,10 @@ function titleCaseCode(value: string | null | undefined) {
     .filter(Boolean)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
+}
+
+function formatDetail(value: string | number | null) {
+  return value ?? "-";
 }
 
 function formatDescription(value: string | null | undefined) {
@@ -118,16 +193,13 @@ function formatBattedBall(value: string | null) {
   return titleCaseCode(value);
 }
 
+function formatRate(value: number | null) {
+  return value === null ? "-" : `${(value * 100).toFixed(1)}%`;
+}
+
 function hasLocation(pitch: PitchResult): pitch is PlottedPitch {
   return pitch.plate_x !== null && pitch.plate_z !== null;
 }
-
-type PlotDomain = {
-  xMin: number;
-  xMax: number;
-  zMin: number;
-  zMax: number;
-};
 
 function domainForZoom(zoom: number): PlotDomain {
   const xCenter = (baseXMin + baseXMax) / 2;
@@ -172,31 +244,213 @@ function describePitchLocation(pitch: PlottedPitch) {
   return horizontal === "Middle" ? `${vertical} Middle` : `${vertical} ${horizontal}`;
 }
 
+function resultCategory(pitch: PitchResult) {
+  if (pitch.description === "hit_by_pitch") return "hit_by_pitch";
+  if (pitch.description?.startsWith("hit_into_play")) return "in_play";
+  if (whiffDescriptions.has(pitch.description ?? "")) return "whiff";
+  if (pitch.description?.startsWith("foul")) return "foul";
+  if (pitch.description === "called_strike") return "strike";
+  return "ball";
+}
+
+function resultLabel(category: string) {
+  const labels: Record<string, string> = {
+    ball: "Ball",
+    strike: "Called Strike",
+    whiff: "Whiff",
+    foul: "Foul",
+    in_play: "In Play",
+    hit_by_pitch: "Hit By Pitch",
+  };
+  return labels[category] ?? titleCaseCode(category);
+}
+
+function contactCategory(pitch: PitchResult) {
+  if (pitch.launch_speed === null) return "no_contact";
+  if (pitch.launch_speed >= 95) return "hard";
+  if (pitch.launch_speed >= 80) return "medium";
+  return "soft";
+}
+
+function contactLabel(category: string) {
+  const labels: Record<string, string> = {
+    hard: "Hard Contact",
+    medium: "Medium Contact",
+    soft: "Soft Contact",
+    no_contact: "No Batted Ball",
+  };
+  return labels[category] ?? titleCaseCode(category);
+}
+
+function colorForPitch(pitch: PlottedPitch, colorMode: ColorMode) {
+  if (colorMode === "result") return resultColors[resultCategory(pitch)] ?? "#7f92a8";
+  if (colorMode === "contact") return contactColors[contactCategory(pitch)] ?? "#7f92a8";
+  return pitchColor(pitch.pitch_type);
+}
+
+function colorLabelForPitch(pitch: PlottedPitch, colorMode: ColorMode) {
+  if (colorMode === "result") return resultLabel(resultCategory(pitch));
+  if (colorMode === "contact") return contactLabel(contactCategory(pitch));
+  return formatPitchType(pitch.pitch_type);
+}
+
+function countMatches(pitch: PlottedPitch, filter: CountFilter) {
+  const balls = pitch.balls ?? 0;
+  const strikes = pitch.strikes ?? 0;
+  if (filter === "ahead") return strikes > balls;
+  if (filter === "behind") return balls > strikes;
+  if (filter === "even") return balls === strikes;
+  if (filter === "two_strikes") return strikes === 2;
+  if (filter === "full") return balls === 3 && strikes === 2;
+  return true;
+}
+
+function average(values: number[]) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+function isStrike(pitch: PlottedPitch) {
+  return strikeDescriptions.has(pitch.description ?? "");
+}
+
+function isWhiff(pitch: PlottedPitch) {
+  return whiffDescriptions.has(pitch.description ?? "");
+}
+
+function zoneBuckets(): Bucket[] {
+  const columns = [
+    { label: "Left", min: zoneLeft, max: zoneLeft + (zoneRight - zoneLeft) / 3 },
+    {
+      label: "Middle",
+      min: zoneLeft + (zoneRight - zoneLeft) / 3,
+      max: zoneLeft + ((zoneRight - zoneLeft) / 3) * 2,
+    },
+    { label: "Right", min: zoneLeft + ((zoneRight - zoneLeft) / 3) * 2, max: zoneRight },
+  ];
+  const rows = [
+    { label: "Upper", min: zoneBottom + ((zoneTop - zoneBottom) / 3) * 2, max: zoneTop },
+    {
+      label: "Middle",
+      min: zoneBottom + (zoneTop - zoneBottom) / 3,
+      max: zoneBottom + ((zoneTop - zoneBottom) / 3) * 2,
+    },
+    { label: "Lower", min: zoneBottom, max: zoneBottom + (zoneTop - zoneBottom) / 3 },
+  ];
+
+  return rows.flatMap((row, rowIndex) =>
+    columns.map((column, columnIndex) => ({
+      column: columnIndex,
+      row: rowIndex,
+      label: row.label === "Middle" ? `${column.label} Middle` : `${row.label} ${column.label}`,
+      xMin: column.min,
+      xMax: column.max,
+      zMin: row.min,
+      zMax: row.max,
+    })),
+  );
+}
+
+function pitchInBucket(pitch: PlottedPitch, bucket: Bucket) {
+  const x = pitcherViewX(pitch.plate_x);
+  return x >= bucket.xMin && x <= bucket.xMax && pitch.plate_z >= bucket.zMin && pitch.plate_z <= bucket.zMax;
+}
+
+function topPitchType(pitches: PlottedPitch[]) {
+  const counts = pitches.reduce((map, pitch) => {
+    const pitchType = pitch.pitch_type ?? "Unknown";
+    map.set(pitchType, (map.get(pitchType) ?? 0) + 1);
+    return map;
+  }, new Map<string, number>());
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
+function summarizeBucket(bucket: Bucket, pitches: PlottedPitch[], denominator: number): BucketSummary {
+  const bucketPitches = pitches.filter((pitch) => pitchInBucket(pitch, bucket));
+  return {
+    bucket,
+    pitches: bucketPitches,
+    count: bucketPitches.length,
+    share: denominator ? bucketPitches.length / denominator : 0,
+    strikeRate: bucketPitches.length
+      ? bucketPitches.filter(isStrike).length / bucketPitches.length
+      : null,
+    whiffRate: bucketPitches.length
+      ? bucketPitches.filter(isWhiff).length / bucketPitches.length
+      : null,
+    averageExitVelocity: average(
+      bucketPitches
+        .map((pitch) => pitch.launch_speed)
+        .filter((value): value is number => value !== null),
+    ),
+    topPitchType: topPitchType(bucketPitches),
+  };
+}
+
+function similarPitches(selectedPitch: PlottedPitch, pitches: PlottedPitch[]) {
+  return pitches.filter((pitch) => {
+    if (pitch === selectedPitch) return false;
+    if (pitch.pitch_type !== selectedPitch.pitch_type) return false;
+    if (pitch.balls !== selectedPitch.balls || pitch.strikes !== selectedPitch.strikes) return false;
+    const distance = Math.hypot(
+      pitcherViewX(pitch.plate_x) - pitcherViewX(selectedPitch.plate_x),
+      pitch.plate_z - selectedPitch.plate_z,
+    );
+    return distance <= 0.45;
+  });
+}
+
+function summaryRate(pitches: PlottedPitch[], predicate: (pitch: PlottedPitch) => boolean) {
+  return pitches.length ? pitches.filter(predicate).length / pitches.length : null;
+}
+
 function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
   const plottedPitches = pitches.filter(hasLocation);
   const [selectedPitch, setSelectedPitch] = useState<PlottedPitch | null>(null);
   const [hoveredPitch, setHoveredPitch] = useState<PlottedPitch | null>(null);
+  const [selectedPitchType, setSelectedPitchType] = useState<string | null>(null);
+  const [hoveredBucket, setHoveredBucket] = useState<BucketSummary | null>(null);
+  const [selectedBucket, setSelectedBucket] = useState<BucketSummary | null>(null);
   const [zoom, setZoom] = useState<(typeof zoomLevels)[number]>(1);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [colorMode, setColorMode] = useState<ColorMode>("pitch");
+  const [countFilter, setCountFilter] = useState<CountFilter>("all");
+  const [batterHand, setBatterHand] = useState<"all" | "L" | "R">("all");
+  const [densityMode, setDensityMode] = useState<DensityMode>("on");
   const domain = domainForZoom(zoom);
+  const filteredPitches = plottedPitches.filter((pitch) => {
+    if (selectedPitchType && pitch.pitch_type !== selectedPitchType) return false;
+    if (batterHand !== "all" && pitch.stand !== batterHand) return false;
+    return countMatches(pitch, countFilter);
+  });
   const tooltipPitch = hoveredPitch ?? selectedPitch;
+  const buckets = useMemo(() => zoneBuckets(), []);
+  const bucketSummaries = buckets.map((bucket) =>
+    summarizeBucket(bucket, filteredPitches, filteredPitches.length),
+  );
+  const visibleBucketSummary = hoveredBucket ?? selectedBucket;
+  const similarPitchSet = selectedPitch ? similarPitches(selectedPitch, filteredPitches) : [];
   const legendItems = useMemo(
     () =>
       Array.from(
         new Set(plottedPitches.map((pitch) => pitch.pitch_type ?? "Unknown")),
-      ).sort(),
+      ).sort((a, b) => formatPitchType(a).localeCompare(formatPitchType(b))),
     [plottedPitches],
   );
+  const resultLegendItems = ["ball", "strike", "whiff", "foul", "in_play", "hit_by_pitch"];
+  const contactLegendItems = ["hard", "medium", "soft", "no_contact"];
 
   useEffect(() => {
     setSelectedPitch(null);
     setHoveredPitch(null);
-  }, [pitches]);
+    setSelectedBucket(null);
+    setHoveredBucket(null);
+  }, [pitches, selectedPitchType, countFilter, batterHand]);
 
   useEffect(() => {
     function clearSelection(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setSelectedPitch(null);
+        setSelectedBucket(null);
       }
     }
 
@@ -245,6 +499,73 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
     );
   }
 
+  function renderBucketTooltip(summary: BucketSummary) {
+    const x = scaleX((summary.bucket.xMin + summary.bucket.xMax) / 2, domain);
+    const y = scaleZ((summary.bucket.zMin + summary.bucket.zMax) / 2, domain);
+    const tooltip = tooltipPosition({ x, y });
+    return (
+      <g
+        className="chart-tooltip"
+        pointerEvents="none"
+        transform={`translate(${tooltip.x} ${tooltip.y})`}
+      >
+        <rect height={tooltip.height} rx="8" width={tooltip.width} />
+        <text className="chart-tooltip-title" x="12" y="21">
+          {summary.bucket.label}
+        </text>
+        <text x="12" y="45">{summary.count} pitches | {formatRate(summary.share)} share</text>
+        <text x="12" y="64">Strike {formatRate(summary.strikeRate)} | Whiff {formatRate(summary.whiffRate)}</text>
+        <text x="12" y="83">Top pitch {formatPitchType(summary.topPitchType)}</text>
+        <text x="12" y="102">Avg EV {formatContactNumber(summary.averageExitVelocity, "mph")}</text>
+      </g>
+    );
+  }
+
+  function renderLegend() {
+    if (colorMode === "result") {
+      return resultLegendItems.map((item) => (
+        <span className="legend-item" key={item}>
+          <span className="legend-swatch" style={{ backgroundColor: resultColors[item] }} />
+          {resultLabel(item)}
+        </span>
+      ));
+    }
+
+    if (colorMode === "contact") {
+      return contactLegendItems.map((item) => (
+        <span className="legend-item" key={item}>
+          <span className="legend-swatch" style={{ backgroundColor: contactColors[item] }} />
+          {contactLabel(item)}
+        </span>
+      ));
+    }
+
+    return legendItems.length > 0 ? (
+      legendItems.map((pitchType) => (
+        <button
+          className={
+            selectedPitchType === pitchType
+              ? "legend-item legend-button is-active"
+              : "legend-item legend-button"
+          }
+          key={pitchType}
+          onClick={() =>
+            setSelectedPitchType((current) => (current === pitchType ? null : pitchType))
+          }
+          type="button"
+        >
+          <span
+            className="legend-swatch"
+            style={{ backgroundColor: pitchColor(pitchType) }}
+          />
+          {formatPitchType(pitchType)}
+        </button>
+      ))
+    ) : (
+      <span className="legend-empty">No pitch types</span>
+    );
+  }
+
   return (
     <section
       className={isExpanded ? "chart-panel chart-panel--expanded" : "chart-panel"}
@@ -252,40 +573,68 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
     >
       <div className="chart-heading">
         <h3 id="strike-zone-title">Strike Zone</h3>
-        <span>{plottedPitches.length} plotted pitches | pitcher view</span>
+        <span>
+          {filteredPitches.length} shown in chart from {plottedPitches.length} filtered pitches
+        </span>
       </div>
 
-      <div className="chart-tools">
-        <div className="pitch-legend" aria-label="Pitch type legend">
-          {legendItems.length > 0 ? (
-            legendItems.map((pitchType) => (
-              <span className="legend-item" key={pitchType}>
-                <span
-                  className="legend-swatch"
-                  style={{ backgroundColor: pitchColor(pitchType) }}
-                />
-                {formatPitchType(pitchType)}
-              </span>
-            ))
-          ) : (
-            <span className="legend-empty">No pitch types</span>
-          )}
-        </div>
-
-        <div className="chart-controls">
-          <span className="chart-view-note">Pitcher Left / Pitcher Right</span>
-          <div className="zoom-controls" aria-label="Strike zone zoom controls">
-            {zoomLevels.map((level) => (
-              <button
-                className={zoom === level ? "zoom-button is-active" : "zoom-button"}
-                key={level}
-                onClick={() => setZoom(level)}
-                type="button"
-              >
-                {level}x
-              </button>
-            ))}
+      <div className="strike-zone-toolbar">
+        <div className="strike-zone-toolbar-row">
+          <span className="chart-view-note strike-zone-orientation">
+            Pitcher Left / Pitcher Right
+          </span>
+          <div className="lens-group">
+            <span className="lens-label">Color</span>
+            <div className="zoom-controls" aria-label="Strike zone color controls">
+              {colorModes.map((mode) => (
+                <button
+                  className={colorMode === mode.value ? "zoom-button is-active" : "zoom-button"}
+                  key={mode.value}
+                  onClick={() => setColorMode(mode.value)}
+                  type="button"
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
           </div>
+          <div className="lens-group">
+            <span className="lens-label">Zoom</span>
+            <div className="zoom-controls" aria-label="Strike zone zoom controls">
+              {zoomLevels.map((level) => (
+                <button
+                  className={zoom === level ? "zoom-button is-active" : "zoom-button"}
+                  key={level}
+                  onClick={() => setZoom(level)}
+                  type="button"
+                >
+                  {level}x
+                </button>
+              ))}
+            </div>
+          </div>
+          <button
+            className={densityMode === "on" ? "secondary-button is-active" : "secondary-button"}
+            onClick={() => setDensityMode((current) => (current === "on" ? "off" : "on"))}
+            type="button"
+          >
+            Density
+          </button>
+          <button
+            className="secondary-button"
+            onClick={() => {
+              setSelectedPitchType(null);
+              setCountFilter("all");
+              setBatterHand("all");
+              setColorMode("pitch");
+              setDensityMode("on");
+              setSelectedPitch(null);
+              setSelectedBucket(null);
+            }}
+            type="button"
+          >
+            Reset Lens
+          </button>
           <button
             className="secondary-button"
             onClick={() => setIsExpanded((current) => !current)}
@@ -293,6 +642,42 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
           >
             {isExpanded ? "Collapse" : "Expand"}
           </button>
+        </div>
+
+        <div className="strike-zone-toolbar-row strike-zone-toolbar-row--secondary">
+          <div className="pitch-legend strike-zone-legend" aria-label="Color legend">
+            {renderLegend()}
+          </div>
+          <div className="lens-group">
+            <span className="lens-label">Count</span>
+            <div className="zoom-controls" aria-label="Count situation filters">
+              {countFilters.map((filter) => (
+                <button
+                  className={countFilter === filter.value ? "zoom-button is-active" : "zoom-button"}
+                  key={filter.value}
+                  onClick={() => setCountFilter(filter.value)}
+                  type="button"
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="lens-group">
+            <span className="lens-label">Batter</span>
+            <div className="zoom-controls" aria-label="Batter handedness filters">
+              {(["all", "L", "R"] as const).map((hand) => (
+                <button
+                  className={batterHand === hand ? "zoom-button is-active" : "zoom-button"}
+                  key={hand}
+                  onClick={() => setBatterHand(hand)}
+                  type="button"
+                >
+                  {hand === "all" ? "All" : `${hand}HH`}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -320,6 +705,21 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
             width={width - padding * 2}
             height={height - padding * 2}
           />
+          {densityMode === "on" ? (
+            <g className="zone-density-layer">
+              {bucketSummaries.map((summary) => (
+                <rect
+                  className="zone-density-cell"
+                  height={scaleZ(summary.bucket.zMin, domain) - scaleZ(summary.bucket.zMax, domain)}
+                  key={`density-${summary.bucket.label}`}
+                  opacity={Math.min(0.42, 0.06 + summary.share * 3.6)}
+                  width={scaleX(summary.bucket.xMax, domain) - scaleX(summary.bucket.xMin, domain)}
+                  x={scaleX(summary.bucket.xMin, domain)}
+                  y={scaleZ(summary.bucket.zMax, domain)}
+                />
+              ))}
+            </g>
+          ) : null}
           <line
             className="plot-axis"
             x1={scaleX(0, domain)}
@@ -341,8 +741,31 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
             width={scaleX(zoneRight, domain) - scaleX(zoneLeft, domain)}
             height={scaleZ(zoneBottom, domain) - scaleZ(zoneTop, domain)}
           />
+          <g className="zone-bucket-layer">
+            {bucketSummaries.map((summary) => (
+              <rect
+                className={
+                  selectedBucket?.bucket.label === summary.bucket.label
+                    ? "zone-bucket is-selected"
+                    : "zone-bucket"
+                }
+                height={scaleZ(summary.bucket.zMin, domain) - scaleZ(summary.bucket.zMax, domain)}
+                key={summary.bucket.label}
+                onClick={() =>
+                  setSelectedBucket((current) =>
+                    current?.bucket.label === summary.bucket.label ? null : summary,
+                  )
+                }
+                onMouseEnter={() => setHoveredBucket(summary)}
+                onMouseLeave={() => setHoveredBucket(null)}
+                width={scaleX(summary.bucket.xMax, domain) - scaleX(summary.bucket.xMin, domain)}
+                x={scaleX(summary.bucket.xMin, domain)}
+                y={scaleZ(summary.bucket.zMax, domain)}
+              />
+            ))}
+          </g>
           <g clipPath="url(#strike-zone-clip)">
-            {plottedPitches.map((pitch, index) => {
+            {filteredPitches.map((pitch, index) => {
               const point = pitchPoint(pitch);
 
               return (
@@ -354,7 +777,7 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
                   }
                   cx={point.x}
                   cy={point.y}
-                  fill={pitchColor(pitch.pitch_type)}
+                  fill={colorForPitch(pitch, colorMode)}
                   key={`${pitch.plate_x}-${pitch.plate_z}-${index}`}
                   onClick={() =>
                     setSelectedPitch((current) => (current === pitch ? null : pitch))
@@ -368,6 +791,7 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
                   }}
                   onMouseEnter={() => setHoveredPitch(pitch)}
                   onMouseLeave={() => setHoveredPitch(null)}
+                  opacity={colorMode === "pitch" || !selectedPitchType ? 0.88 : 0.58}
                   r="5"
                   tabIndex={0}
                 />
@@ -375,12 +799,53 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
             })}
           </g>
           {tooltipPitch ? renderPitchTooltip(tooltipPitch) : null}
+          {!tooltipPitch && visibleBucketSummary ? renderBucketTooltip(visibleBucketSummary) : null}
         </svg>
 
-        {plottedPitches.length === 0 ? (
-          <p className="chart-empty">No pitch locations to plot.</p>
+        {filteredPitches.length === 0 ? (
+          <p className="chart-empty">No pitch locations match these chart filters.</p>
         ) : null}
       </div>
+
+      {selectedBucket ? (
+        <div className="pitch-detail-panel selection-panel">
+          <div className="selection-panel-header">
+            <span>Selected Zone</span>
+            <strong>{selectedBucket.bucket.label}</strong>
+          </div>
+          <div>
+            <span>Pitches</span>
+            <strong>{selectedBucket.count}</strong>
+          </div>
+          <div>
+            <span>Share</span>
+            <strong>{formatRate(selectedBucket.share)}</strong>
+          </div>
+          <div>
+            <span>Strike Rate</span>
+            <strong>{formatRate(selectedBucket.strikeRate)}</strong>
+          </div>
+          <div>
+            <span>Whiff Rate</span>
+            <strong>{formatRate(selectedBucket.whiffRate)}</strong>
+          </div>
+          <div>
+            <span>Top Pitch</span>
+            <strong>{formatPitchType(selectedBucket.topPitchType)}</strong>
+          </div>
+          <div>
+            <span>Avg EV</span>
+            <strong>{formatContactNumber(selectedBucket.averageExitVelocity, "mph")}</strong>
+          </div>
+          <button
+            className="detail-close-button clear-selection-button"
+            onClick={() => setSelectedBucket(null)}
+            type="button"
+          >
+            Clear Zone
+          </button>
+        </div>
+      ) : null}
 
       {selectedPitch ? (
         <div className="pitch-detail-panel selection-panel">
@@ -391,6 +856,10 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
           <div>
             <span>Pitch</span>
             <strong>{formatPitchType(selectedPitch.pitch_type)}</strong>
+          </div>
+          <div>
+            <span>Color Group</span>
+            <strong>{colorLabelForPitch(selectedPitch, colorMode)}</strong>
           </div>
           <div>
             <span>Velocity</span>
@@ -433,6 +902,18 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
           <div>
             <span>Location</span>
             <strong>{describePitchLocation(selectedPitch)}</strong>
+          </div>
+          <div>
+            <span>Similar Pitches</span>
+            <strong>{similarPitchSet.length}</strong>
+          </div>
+          <div>
+            <span>Similar Whiff</span>
+            <strong>{formatRate(summaryRate(similarPitchSet, isWhiff))}</strong>
+          </div>
+          <div>
+            <span>Similar Strike</span>
+            <strong>{formatRate(summaryRate(similarPitchSet, isStrike))}</strong>
           </div>
           <button
             className="detail-close-button clear-selection-button"
