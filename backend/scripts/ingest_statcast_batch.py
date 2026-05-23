@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ingest_statcast import fetch_statcast_pitcher, resolve_pitcher_id, save_parquet
+from statcast_provider import get_statcast_provider
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -49,6 +50,12 @@ def parse_args() -> argparse.Namespace:
         "--index-only",
         action="store_true",
         help="Skip fetching data and rebuild the manifest from the existing parquet.",
+    )
+    parser.add_argument(
+        "--provider",
+        choices=["pybaseball"],
+        default="pybaseball",
+        help="Statcast data provider implementation.",
     )
     return parser.parse_args()
 
@@ -203,15 +210,17 @@ def main() -> int:
     manifest_path = Path(args.manifest)
     pitcher_ids = list(args.pitcher_id)
     ingestion_results: list[dict[str, Any]] = []
+    provider = get_statcast_provider(args.provider)
 
     try:
         if args.index_only:
             LOGGER.info("index-only mode: rebuilding manifest from %s", output_path)
         else:
             requested_names_by_id: dict[int, str] = {}
+            LOGGER.info("provider: %s", args.provider)
             for pitcher_name in args.pitcher_name:
                 LOGGER.info("resolving pitcher name: %s", pitcher_name)
-                resolved_pitcher_id = resolve_pitcher_id(pitcher_name)
+                resolved_pitcher_id = resolve_pitcher_id(pitcher_name, provider)
                 pitcher_ids.append(resolved_pitcher_id)
                 requested_names_by_id[resolved_pitcher_id] = pitcher_name
 
@@ -219,7 +228,12 @@ def main() -> int:
             for index, pitcher_id in enumerate(unique_preserving_order(pitcher_ids)):
                 LOGGER.info("ingesting pitcher id: %s", pitcher_id)
                 try:
-                    data = fetch_statcast_pitcher(args.start_date, args.end_date, pitcher_id)
+                    data = fetch_statcast_pitcher(
+                        args.start_date,
+                        args.end_date,
+                        pitcher_id,
+                        provider,
+                    )
                     pitcher_summary = summarize_dataframe(
                         data,
                         pitcher_id,

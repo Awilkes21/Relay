@@ -1,6 +1,7 @@
 import sys
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 
 
@@ -15,6 +16,17 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR / "scripts"))
 
 from ingest_statcast import parse_pitcher_name, save_parquet
+from ingest_statcast import fetch_statcast_pitcher, resolve_pitcher_id
+
+
+class FakeStatcastProvider:
+    def resolve_pitcher_id(self, pitcher_name: str) -> int:
+        self.resolved_pitcher_name = pitcher_name
+        return 605400
+
+    def fetch_pitcher_pitches(self, start_date: date, end_date: date, pitcher_id: int):
+        self.fetch_args = (start_date, end_date, pitcher_id)
+        return pd.DataFrame([{"pitcher": pitcher_id, "game_date": start_date.isoformat()}])
 
 
 class IngestStatcastTests(unittest.TestCase):
@@ -23,6 +35,22 @@ class IngestStatcastTests(unittest.TestCase):
 
     def test_parses_last_comma_first_pitcher_name(self):
         self.assertEqual(parse_pitcher_name("Nola, Aaron"), ("Nola", "Aaron"))
+
+    def test_ingestion_helpers_delegate_to_provider(self):
+        provider = FakeStatcastProvider()
+
+        pitcher_id = resolve_pitcher_id("Aaron Nola", provider)
+        data = fetch_statcast_pitcher(
+            date(2024, 4, 1),
+            date(2024, 4, 2),
+            pitcher_id,
+            provider,
+        )
+
+        self.assertEqual(pitcher_id, 605400)
+        self.assertEqual(provider.resolved_pitcher_name, "Aaron Nola")
+        self.assertEqual(provider.fetch_args, (date(2024, 4, 1), date(2024, 4, 2), 605400))
+        self.assertEqual(len(data), 1)
 
     def test_append_merges_and_dedupes_shared_cache(self):
         with tempfile.TemporaryDirectory() as temp_dir:

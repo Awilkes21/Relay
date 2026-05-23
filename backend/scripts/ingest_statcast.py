@@ -4,6 +4,12 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from statcast_provider import (
+    StatcastProvider,
+    get_statcast_provider,
+    parse_pitcher_name,
+)
+
 
 LOGGER = logging.getLogger("relay.ingest_statcast")
 
@@ -43,68 +49,34 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Merge fetched rows with the existing output parquet.",
     )
+    parser.add_argument(
+        "--provider",
+        choices=["pybaseball"],
+        default="pybaseball",
+        help="Statcast data provider implementation.",
+    )
     args = parser.parse_args()
     if args.pitcher_id is None and not args.pitcher_name:
         parser.error("one of --pitcher-id or --pitcher-name is required")
     return args
 
 
-def parse_pitcher_name(pitcher_name: str) -> tuple[str, str]:
-    normalized_name = " ".join(pitcher_name.strip().split())
-    if not normalized_name:
-        raise ValueError("pitcher name cannot be empty")
-
-    if "," in normalized_name:
-        last_name, first_name = [part.strip() for part in normalized_name.split(",", 1)]
-    else:
-        name_parts = normalized_name.split()
-        if len(name_parts) < 2:
-            raise ValueError("pitcher name must include first and last name")
-        first_name = " ".join(name_parts[:-1])
-        last_name = name_parts[-1]
-
-    if not first_name or not last_name:
-        raise ValueError("pitcher name must include first and last name")
-
-    return last_name, first_name
+def resolve_pitcher_id(
+    pitcher_name: str,
+    provider: StatcastProvider | None = None,
+) -> int:
+    statcast_provider = provider or get_statcast_provider()
+    return statcast_provider.resolve_pitcher_id(pitcher_name)
 
 
-def resolve_pitcher_id(pitcher_name: str) -> int:
-    try:
-        from pybaseball import playerid_lookup
-    except ImportError as exc:
-        raise RuntimeError(
-            "pybaseball is not installed. Run `pip install -r backend/requirements.txt`."
-        ) from exc
-
-    last_name, first_name = parse_pitcher_name(pitcher_name)
-    players = playerid_lookup(last_name, first_name)
-    if players.empty:
-        raise RuntimeError(f"no MLBAM player found for pitcher name: {pitcher_name}")
-
-    players = players.dropna(subset=["key_mlbam"])
-    if players.empty:
-        raise RuntimeError(f"no MLBAM ID found for pitcher name: {pitcher_name}")
-
-    active_players = players[players.get("mlb_played_last", 0).fillna(0) >= 2015]
-    match = active_players.iloc[0] if not active_players.empty else players.iloc[0]
-
-    return int(match["key_mlbam"])
-
-
-def fetch_statcast_pitcher(start_date: date, end_date: date, pitcher_id: int):
-    try:
-        from pybaseball import statcast_pitcher
-    except ImportError as exc:
-        raise RuntimeError(
-            "pybaseball is not installed. Run `pip install -r backend/requirements.txt`."
-        ) from exc
-
-    return statcast_pitcher(
-        start_dt=start_date.isoformat(),
-        end_dt=end_date.isoformat(),
-        player_id=pitcher_id,
-    )
+def fetch_statcast_pitcher(
+    start_date: date,
+    end_date: date,
+    pitcher_id: int,
+    provider: StatcastProvider | None = None,
+):
+    statcast_provider = provider or get_statcast_provider()
+    return statcast_provider.fetch_pitcher_pitches(start_date, end_date, pitcher_id)
 
 
 def save_parquet(dataframe, output_path: Path, append: bool = False) -> int:
@@ -188,18 +160,20 @@ def main() -> int:
 
     output_path = Path(args.output)
     pitcher_id = args.pitcher_id
+    provider = get_statcast_provider(args.provider)
 
     LOGGER.info("date range: %s to %s", args.start_date, args.end_date)
     LOGGER.info("append mode: %s", args.append)
+    LOGGER.info("provider: %s", args.provider)
 
     try:
         if pitcher_id is None:
             LOGGER.info("pitcher name: %s", args.pitcher_name)
-            pitcher_id = resolve_pitcher_id(args.pitcher_name)
+            pitcher_id = resolve_pitcher_id(args.pitcher_name, provider)
 
         LOGGER.info("pitcher id: %s", pitcher_id)
 
-        data = fetch_statcast_pitcher(args.start_date, args.end_date, pitcher_id)
+        data = fetch_statcast_pitcher(args.start_date, args.end_date, pitcher_id, provider)
         LOGGER.info("fetched row count: %s", len(data))
 
         saved_row_count = save_parquet(data, output_path, append=args.append)
