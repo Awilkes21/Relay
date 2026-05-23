@@ -112,18 +112,6 @@ function compareMovementClass(pair: MovementPair, selected: boolean) {
     .join(" ");
 }
 
-function pairTooltip(pair: MovementPair, periodALabel: string, periodBLabel: string) {
-  return [
-    formatPitchType(pair.pitchType),
-    `${periodALabel}: ${pair.a?.count ?? 0} pitches, HB ${formatNumber(pair.a?.horizontalBreak)} in, IVB ${formatNumber(pair.a?.inducedVerticalBreak)} in`,
-    `${periodBLabel}: ${pair.b?.count ?? 0} pitches, HB ${formatNumber(pair.b?.horizontalBreak)} in, IVB ${formatNumber(pair.b?.inducedVerticalBreak)} in`,
-    `Shape change: ${formatNumber(pair.distance)} in`,
-    pair.lowSample ? `Small sample: fewer than ${lowSampleThreshold} pitches in a period` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
 function connectorEndpoint(
   start: { x: number; y: number },
   end: { x: number; y: number },
@@ -247,10 +235,8 @@ function CompareMovementChart({
   const sideCenterY = height / 2;
   const sideCenters = { A: width * 0.29, B: width * 0.71 };
   const ringValues = ringValuesForDomain(domainMax);
-  const activePair =
-    movementPairs.find((pair) => pair.pitchType === selectedPitchType) ??
-    movementPairs.find((pair) => pair.pitchType === hoveredPitchType) ??
-    null;
+  const selectedPair =
+    movementPairs.find((pair) => pair.pitchType === selectedPitchType) ?? null;
   const periodAArmLine = armAngleLine(
     comparison.period_a.metrics.arm_angle,
     comparison.pitcher_hand,
@@ -286,6 +272,47 @@ function CompareMovementChart({
   function pointY(point: MovementPoint) {
     const radius = chartMode === "overlay" ? overlayRadius : sideRadius;
     return scaleYFromCenter(point.inducedVerticalBreak, sideCenterY, radius, domainMax);
+  }
+
+  function tooltipPosition(point: { x: number; y: number }) {
+    const tooltipWidth = 220;
+    const tooltipHeight = 112;
+
+    return {
+      x: Math.min(Math.max(point.x + 14, 24), width - 24 - tooltipWidth),
+      y: Math.min(Math.max(point.y - tooltipHeight - 10, 24), height - 24 - tooltipHeight),
+      width: tooltipWidth,
+      height: tooltipHeight,
+    };
+  }
+
+  function renderPairTooltip(pair: MovementPair | null) {
+    if (!pair) return null;
+    const anchor = pair.b ?? pair.a;
+    if (!anchor) return null;
+
+    const point = {
+      x: pointX(anchor, anchor.period),
+      y: pointY(anchor),
+    };
+    const tooltip = tooltipPosition(point);
+
+    return (
+      <g
+        className="chart-tooltip"
+        pointerEvents="none"
+        transform={`translate(${tooltip.x} ${tooltip.y})`}
+      >
+        <rect height={tooltip.height} rx="8" width={tooltip.width} />
+        <text className="chart-tooltip-title" x="12" y="21">
+          {formatPitchType(pair.pitchType)}
+        </text>
+        <text x="12" y="45">{periodALabel}: {pair.a?.count ?? 0} pitches, {formatNumber(pair.a?.horizontalBreak)} HB</text>
+        <text x="12" y="64">{periodBLabel}: {pair.b?.count ?? 0} pitches, {formatNumber(pair.b?.horizontalBreak)} HB</text>
+        <text x="12" y="83">Shape change {formatNumber(pair.distance)}" | IVB {formatNumber(pair.b?.inducedVerticalBreak)}</text>
+        <text x="12" y="102">Click to pin this pitch type</text>
+      </g>
+    );
   }
 
   function renderMovementFrame(centerX: number, radius: number, label?: string) {
@@ -474,6 +501,17 @@ function CompareMovementChart({
             <span><i className="movement-period-dot movement-period-dot--a" />{periodALabel}</span>
             <span><i className="movement-period-dot movement-period-dot--b" />{periodBLabel}</span>
           </div>
+          <div className="pitch-legend movement-pitch-legend" aria-label="Pitch type colors">
+            {movementPairs.map((pair) => (
+              <span className="legend-item" key={pair.pitchType}>
+                <i
+                  className="legend-swatch"
+                  style={{ backgroundColor: pitchColor(pair.pitchType) }}
+                />
+                {formatPitchType(pair.pitchType)}
+              </span>
+            ))}
+          </div>
           <div className="zoom-controls" aria-label="Movement diff view">
             <button
               className={chartMode === "overlay" ? "zoom-button is-active" : "zoom-button"}
@@ -629,74 +667,62 @@ function CompareMovementChart({
                     r="6"
                   />
                 ) : null}
-                {chartMode === "side_by_side" && aX !== null && aY !== null ? (
-                  <text
-                    className="plot-label compare-movement-label"
-                    x={aX + 9}
-                    y={aY - 9}
-                  >
-                    {formatPitchType(pair.pitchType)}
-                  </text>
-                ) : null}
-                {bX !== null && bY !== null ? (
-                  <text
-                    className="plot-label compare-movement-label"
-                    x={bX + 9}
-                    y={bY - 9}
-                  >
-                    {formatPitchType(pair.pitchType)}
-                  </text>
-                ) : null}
-                <title>{pairTooltip(pair, periodALabel, periodBLabel)}</title>
               </g>
             );
           })}
-          {activePair ? renderInset(activePair) : null}
+          {hoveredPitchType || selectedPitchType
+            ? renderPairTooltip(
+                movementPairs.find(
+                  (pair) => pair.pitchType === (hoveredPitchType ?? selectedPitchType),
+                ) ?? null,
+              )
+            : null}
+          {selectedPair ? renderInset(selectedPair) : null}
         </svg>
         {movementPairs.length === 0 ? (
           <p className="chart-empty">No movement averages to compare.</p>
         ) : null}
       </div>
 
-      {activePair ? (
+      {selectedPair ? (
         <div className="pitch-detail-panel selection-panel">
           <div className="selection-panel-header">
-            <span>{selectedPitchType ? "Selected Pitch Type" : "Preview Pitch Type"}</span>
-            <strong>{formatPitchType(activePair.pitchType)}</strong>
+            <span>Selected Pitch Type</span>
+            <strong>{formatPitchType(selectedPair.pitchType)}</strong>
           </div>
           <div>
-            <span>{selectedPitchType ? "Selected" : "Hover"}</span>
-            <strong>{formatPitchType(activePair.pitchType)}</strong>
+            <span>Pitch</span>
+            <strong>{formatPitchType(selectedPair.pitchType)}</strong>
           </div>
           <div>
             <span>{periodALabel} Count</span>
-            <strong>{activePair.a?.count ?? 0}</strong>
+            <strong>{selectedPair.a?.count ?? 0}</strong>
           </div>
           <div>
             <span>{periodBLabel} Count</span>
-            <strong>{activePair.b?.count ?? 0}</strong>
+            <strong>{selectedPair.b?.count ?? 0}</strong>
           </div>
           <div>
             <span>{periodALabel} Shape</span>
             <strong>
-              {formatNumber(activePair.a?.horizontalBreak)} HB / {formatNumber(activePair.a?.inducedVerticalBreak)} IVB
+              {formatNumber(selectedPair.a?.horizontalBreak)} HB / {formatNumber(selectedPair.a?.inducedVerticalBreak)} IVB
             </strong>
           </div>
           <div>
             <span>{periodBLabel} Shape</span>
             <strong>
-              {formatNumber(activePair.b?.horizontalBreak)} HB / {formatNumber(activePair.b?.inducedVerticalBreak)} IVB
+              {formatNumber(selectedPair.b?.horizontalBreak)} HB / {formatNumber(selectedPair.b?.inducedVerticalBreak)} IVB
             </strong>
           </div>
           <div>
             <span>Shape Change</span>
-            <strong>{formatNumber(activePair.distance)} in</strong>
+            <strong>{formatNumber(selectedPair.distance)} in</strong>
           </div>
           <div>
             <span>Arm Angle Delta</span>
             <strong>{formatNumber(comparison.deltas.arm_angle)} deg</strong>
           </div>
-          {activePair.lowSample ? (
+          {selectedPair.lowSample ? (
             <div>
               <span>Sample</span>
               <strong>Small sample</strong>

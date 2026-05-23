@@ -102,6 +102,7 @@ function armAngleLine(
 function MovementChart({ pitches }: MovementChartProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedPitch, setSelectedPitch] = useState<PlottedMovementPitch | null>(null);
+  const [hoveredPitch, setHoveredPitch] = useState<PlottedMovementPitch | null>(null);
   const handedness = pitcherHandedness(pitches);
   const sideLabels = horizontalSideLabels(handedness);
   const plottedPitches = pitches
@@ -139,9 +140,14 @@ function MovementChart({ pitches }: MovementChartProps) {
     centerY,
     plotRadius,
   );
+  const plottedPitchTypes = Array.from(
+    new Set(plottedPitches.map((pitch) => pitch.pitch_type).filter(Boolean)),
+  ).sort((a, b) => formatPitchType(a).localeCompare(formatPitchType(b)));
+  const tooltipPitch = hoveredPitch ?? selectedPitch;
 
   useEffect(() => {
     setSelectedPitch(null);
+    setHoveredPitch(null);
   }, [pitches]);
 
   useEffect(() => {
@@ -154,6 +160,46 @@ function MovementChart({ pitches }: MovementChartProps) {
     window.addEventListener("keydown", clearSelection);
     return () => window.removeEventListener("keydown", clearSelection);
   }, []);
+
+  function movementPoint(pitch: PlottedMovementPitch) {
+    return {
+      x: scaleX(pitch.horizontalBreak, domainMax),
+      y: scaleY(pitch.inducedVerticalBreak, domainMax),
+    };
+  }
+
+  function tooltipPosition(point: { x: number; y: number }) {
+    const tooltipWidth = 196;
+    const tooltipHeight = 100;
+
+    return {
+      x: Math.min(Math.max(point.x + 14, padding), width - padding - tooltipWidth),
+      y: Math.min(Math.max(point.y - tooltipHeight - 10, padding), height - padding - tooltipHeight),
+      width: tooltipWidth,
+      height: tooltipHeight,
+    };
+  }
+
+  function renderPitchTooltip(pitch: PlottedMovementPitch) {
+    const point = movementPoint(pitch);
+    const tooltip = tooltipPosition(point);
+
+    return (
+      <g
+        className="chart-tooltip"
+        pointerEvents="none"
+        transform={`translate(${tooltip.x} ${tooltip.y})`}
+      >
+        <rect height={tooltip.height} rx="8" width={tooltip.width} />
+        <text className="chart-tooltip-title" x="12" y="21">
+          {formatPitchType(pitch.pitch_type)}
+        </text>
+        <text x="12" y="45">Velo {formatDetail(pitch.release_speed)} | Spin {formatSpin(pitch.release_spin_rate)}</text>
+        <text x="12" y="64">HB {pitch.horizontalBreak.toFixed(1)}" | IVB {pitch.inducedVerticalBreak.toFixed(1)}"</text>
+        <text x="12" y="83">{formatArmAngle(pitch.armAngle)} | Throws {formatDetail(pitch.p_throws)}</text>
+      </g>
+    );
+  }
 
   return (
     <section
@@ -169,13 +215,26 @@ function MovementChart({ pitches }: MovementChartProps) {
         <span className="chart-view-note">
           {sideLabels.left} / {sideLabels.right} | Rise / Drop
         </span>
-        <button
-          className="secondary-button"
-          onClick={() => setIsExpanded((current) => !current)}
-          type="button"
-        >
-          {isExpanded ? "Collapse" : "Expand"}
-        </button>
+        <div className="chart-controls">
+          <div className="pitch-legend movement-pitch-legend" aria-label="Pitch type colors">
+            {plottedPitchTypes.map((pitchType) => (
+              <span className="legend-item" key={pitchType}>
+                <i
+                  className="legend-swatch"
+                  style={{ backgroundColor: pitchColor(pitchType) }}
+                />
+                {formatPitchType(pitchType)}
+              </span>
+            ))}
+          </div>
+          <button
+            className="secondary-button"
+            onClick={() => setIsExpanded((current) => !current)}
+            type="button"
+          >
+            {isExpanded ? "Collapse" : "Expand"}
+          </button>
+        </div>
       </div>
 
       <div className="strike-zone-frame">
@@ -267,41 +326,37 @@ function MovementChart({ pitches }: MovementChartProps) {
             </g>
           ) : null}
           {plottedPitches.map((pitch, index) => {
+            const point = movementPoint(pitch);
             return (
-              <circle
-                className={
-                  selectedPitch === pitch
-                    ? "pitch-point pitch-point--selected"
-                    : "pitch-point"
-                }
-                cx={scaleX(pitch.horizontalBreak, domainMax)}
-                cy={scaleY(pitch.inducedVerticalBreak, domainMax)}
-                fill={pitchColor(pitch.pitch_type)}
-                key={`${pitch.horizontalBreak}-${pitch.inducedVerticalBreak}-${index}`}
-                onClick={() =>
-                  setSelectedPitch((current) => (current === pitch ? null : pitch))
-                }
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    setSelectedPitch((current) => (current === pitch ? null : pitch));
+              <g key={`${pitch.horizontalBreak}-${pitch.inducedVerticalBreak}-${index}`}>
+                <circle
+                  className={
+                    selectedPitch === pitch
+                      ? "pitch-point pitch-point--selected"
+                      : "pitch-point"
                   }
-                }}
-                r="5"
-                tabIndex={0}
-              >
-                <title>
-                  {[
-                    `Pitch: ${formatPitchType(pitch.pitch_type)}`,
-                    `Horizontal: ${pitch.horizontalBreak.toFixed(1)} in (pitcher view)`,
-                    `Vertical: ${pitch.inducedVerticalBreak.toFixed(1)} in`,
-                    `Velocity: ${pitch.release_speed ?? ""}`,
-                    `Throws: ${pitch.p_throws ?? ""}`,
-                    formatArmAngle(pitch.armAngle),
-                  ].join("\n")}
-                </title>
-              </circle>
+                  cx={point.x}
+                  cy={point.y}
+                  fill={pitchColor(pitch.pitch_type)}
+                  onClick={() =>
+                    setSelectedPitch((current) => (current === pitch ? null : pitch))
+                  }
+                  onFocus={() => setHoveredPitch(pitch)}
+                  onBlur={() => setHoveredPitch(null)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      setSelectedPitch((current) => (current === pitch ? null : pitch));
+                    }
+                  }}
+                  onMouseEnter={() => setHoveredPitch(pitch)}
+                  onMouseLeave={() => setHoveredPitch(null)}
+                  r="5"
+                  tabIndex={0}
+                />
+              </g>
             );
           })}
+          {tooltipPitch ? renderPitchTooltip(tooltipPitch) : null}
         </svg>
         {plottedPitches.length === 0 ? (
           <p className="chart-empty">No movement values to plot.</p>

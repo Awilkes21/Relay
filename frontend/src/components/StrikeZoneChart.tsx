@@ -23,6 +23,7 @@ const zoneRight = 0.83;
 const zoneTop = 3.5;
 const zoneBottom = 1.5;
 const zoneMiddle = (zoneTop + zoneBottom) / 2;
+const zoneCenterX = (zoneLeft + zoneRight) / 2;
 const zoomLevels = [1, 1.5, 2] as const;
 
 const pitchColors: Record<string, string> = {
@@ -33,6 +34,22 @@ const pitchColors: Record<string, string> = {
   CU: "#9a3326",
   FC: "#44633f",
   FS: "#4b5565",
+};
+
+const descriptionLabels: Record<string, string> = {
+  ball: "Ball",
+  called_strike: "Called Strike",
+  blocked_ball: "Blocked Ball",
+  swinging_strike: "Swinging Strike",
+  swinging_strike_blocked: "Swinging Strike, Blocked",
+  foul: "Foul",
+  foul_tip: "Foul Tip",
+  foul_bunt: "Foul Bunt",
+  missed_bunt: "Missed Bunt",
+  hit_by_pitch: "Hit By Pitch",
+  hit_into_play: "Ball In Play",
+  hit_into_play_no_out: "Ball In Play, No Out",
+  hit_into_play_score: "Ball In Play, Run Scores",
 };
 
 function scaleX(value: number, domain: PlotDomain) {
@@ -58,29 +75,30 @@ function pitcherViewX(plateX: number) {
   return plateX * -1;
 }
 
-function formatTooltip(pitch: PitchResult) {
-  const count =
-    pitch.balls === null && pitch.strikes === null
-      ? "Count: "
-      : `Count: ${pitch.balls ?? ""}-${pitch.strikes ?? ""}`;
-
-  return [
-    `Pitch: ${formatPitchType(pitch.pitch_type)}`,
-    `Velocity: ${formatDetail(pitch.release_speed)}`,
-    `Spin: ${formatSpin(pitch.release_spin_rate)}`,
-    `Induced vertical break: ${formatBreak(pitch.pfx_z)}`,
-    `Horizontal break: ${formatBreak(pitch.pfx_x)}`,
-    `Exit velocity: ${formatContactNumber(pitch.launch_speed, "mph")}`,
-    `Launch angle: ${formatContactNumber(pitch.launch_angle, "deg", 0)}`,
-    `Batted ball: ${formatBattedBall(pitch.bb_type)}`,
-    "View: Pitcher",
-    `Description: ${pitch.description ?? ""}`,
-    count,
-  ].join("\n");
-}
-
 function formatDetail(value: string | number | null) {
   return value ?? "-";
+}
+
+function titleCaseCode(value: string | null | undefined) {
+  if (!value) return "-";
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function formatDescription(value: string | null | undefined) {
+  if (!value) return "-";
+  return descriptionLabels[value] ?? titleCaseCode(value);
+}
+
+function formatEvent(value: string | null | undefined) {
+  return titleCaseCode(value);
+}
+
+function formatPitchResult(pitch: PitchResult) {
+  return pitch.events ? formatEvent(pitch.events) : formatDescription(pitch.description);
 }
 
 function formatSpin(value: number | null) {
@@ -97,10 +115,7 @@ function formatContactNumber(value: number | null, unit: string, digits = 1) {
 
 function formatBattedBall(value: string | null) {
   if (!value) return "-";
-  return value
-    .split("_")
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
+  return titleCaseCode(value);
 }
 
 function hasLocation(pitch: PitchResult): pitch is PlottedPitch {
@@ -128,12 +143,43 @@ function domainForZoom(zoom: number): PlotDomain {
   };
 }
 
+function describePitchLocation(pitch: PlottedPitch) {
+  const x = pitcherViewX(pitch.plate_x);
+  const z = pitch.plate_z;
+  const vertical =
+    z > zoneTop
+      ? "Above Zone"
+      : z < zoneBottom
+        ? "Below Zone"
+        : z >= zoneMiddle
+          ? "Upper"
+          : "Lower";
+  const horizontal =
+    x < zoneLeft
+      ? "Outside Left"
+      : x > zoneRight
+        ? "Outside Right"
+        : x < zoneCenterX - 0.2
+          ? "Left Side"
+          : x > zoneCenterX + 0.2
+            ? "Right Side"
+            : "Middle";
+
+  if (vertical === "Above Zone" || vertical === "Below Zone") {
+    return horizontal === "Middle" ? vertical : `${vertical}, ${horizontal}`;
+  }
+
+  return horizontal === "Middle" ? `${vertical} Middle` : `${vertical} ${horizontal}`;
+}
+
 function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
   const plottedPitches = pitches.filter(hasLocation);
   const [selectedPitch, setSelectedPitch] = useState<PlottedPitch | null>(null);
+  const [hoveredPitch, setHoveredPitch] = useState<PlottedPitch | null>(null);
   const [zoom, setZoom] = useState<(typeof zoomLevels)[number]>(1);
   const [isExpanded, setIsExpanded] = useState(false);
   const domain = domainForZoom(zoom);
+  const tooltipPitch = hoveredPitch ?? selectedPitch;
   const legendItems = useMemo(
     () =>
       Array.from(
@@ -144,6 +190,7 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
 
   useEffect(() => {
     setSelectedPitch(null);
+    setHoveredPitch(null);
   }, [pitches]);
 
   useEffect(() => {
@@ -156,6 +203,47 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
     window.addEventListener("keydown", clearSelection);
     return () => window.removeEventListener("keydown", clearSelection);
   }, []);
+
+  function pitchPoint(pitch: PlottedPitch) {
+    return {
+      x: scaleX(pitcherViewX(pitch.plate_x), domain),
+      y: scaleZ(pitch.plate_z, domain),
+    };
+  }
+
+  function tooltipPosition(point: { x: number; y: number }) {
+    const tooltipWidth = 190;
+    const tooltipHeight = 116;
+
+    return {
+      x: Math.min(Math.max(point.x + 14, padding), width - padding - tooltipWidth),
+      y: Math.min(Math.max(point.y - tooltipHeight - 10, padding), height - padding - tooltipHeight),
+      width: tooltipWidth,
+      height: tooltipHeight,
+    };
+  }
+
+  function renderPitchTooltip(pitch: PlottedPitch) {
+    const point = pitchPoint(pitch);
+    const tooltip = tooltipPosition(point);
+
+    return (
+      <g
+        className="chart-tooltip"
+        pointerEvents="none"
+        transform={`translate(${tooltip.x} ${tooltip.y})`}
+      >
+        <rect height={tooltip.height} rx="8" width={tooltip.width} />
+        <text className="chart-tooltip-title" x="12" y="21">
+          {formatPitchType(pitch.pitch_type)}
+        </text>
+        <text x="12" y="45">Velo {formatDetail(pitch.release_speed)} | Spin {formatSpin(pitch.release_spin_rate)}</text>
+        <text x="12" y="64">Count {pitch.balls ?? "-"}-{pitch.strikes ?? "-"} | {formatPitchResult(pitch)}</text>
+        <text x="12" y="83">IVB {formatBreak(pitch.pfx_z)} | HB {formatBreak(pitch.pfx_x)}</text>
+        <text x="12" y="102">EV {formatContactNumber(pitch.launch_speed, "mph")}</text>
+      </g>
+    );
+  }
 
   return (
     <section
@@ -254,32 +342,39 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
             height={scaleZ(zoneBottom, domain) - scaleZ(zoneTop, domain)}
           />
           <g clipPath="url(#strike-zone-clip)">
-            {plottedPitches.map((pitch, index) => (
-              <circle
-                className={
-                  selectedPitch === pitch
-                    ? "pitch-point pitch-point--selected"
-                    : "pitch-point"
-                }
-                cx={scaleX(pitcherViewX(pitch.plate_x), domain)}
-                cy={scaleZ(pitch.plate_z, domain)}
-                fill={pitchColor(pitch.pitch_type)}
-                key={`${pitch.plate_x}-${pitch.plate_z}-${index}`}
-                onClick={() =>
-                  setSelectedPitch((current) => (current === pitch ? null : pitch))
-                }
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    setSelectedPitch((current) => (current === pitch ? null : pitch));
+            {plottedPitches.map((pitch, index) => {
+              const point = pitchPoint(pitch);
+
+              return (
+                <circle
+                  className={
+                    selectedPitch === pitch
+                      ? "pitch-point pitch-point--selected"
+                      : "pitch-point"
                   }
-                }}
-                r="5"
-                tabIndex={0}
-              >
-                <title>{formatTooltip(pitch)}</title>
-              </circle>
-            ))}
+                  cx={point.x}
+                  cy={point.y}
+                  fill={pitchColor(pitch.pitch_type)}
+                  key={`${pitch.plate_x}-${pitch.plate_z}-${index}`}
+                  onClick={() =>
+                    setSelectedPitch((current) => (current === pitch ? null : pitch))
+                  }
+                  onFocus={() => setHoveredPitch(pitch)}
+                  onBlur={() => setHoveredPitch(null)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      setSelectedPitch((current) => (current === pitch ? null : pitch));
+                    }
+                  }}
+                  onMouseEnter={() => setHoveredPitch(pitch)}
+                  onMouseLeave={() => setHoveredPitch(null)}
+                  r="5"
+                  tabIndex={0}
+                />
+              );
+            })}
           </g>
+          {tooltipPitch ? renderPitchTooltip(tooltipPitch) : null}
         </svg>
 
         {plottedPitches.length === 0 ? (
@@ -332,12 +427,12 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
             </strong>
           </div>
           <div>
-            <span>Description</span>
-            <strong>{formatDetail(selectedPitch.description)}</strong>
+            <span>Result</span>
+            <strong>{formatPitchResult(selectedPitch)}</strong>
           </div>
           <div>
             <span>Location</span>
-            <strong>Pitcher view</strong>
+            <strong>{describePitchLocation(selectedPitch)}</strong>
           </div>
           <button
             className="detail-close-button clear-selection-button"

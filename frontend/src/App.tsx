@@ -26,6 +26,7 @@ import "./App.css";
 
 type BackendStatus = "checking" | "connected" | "error";
 type ActiveView = "explorer" | "compare";
+type ThemeMode = "light" | "dark";
 type ComparePreset = "first_second" | "last30_previous30" | "month_month";
 type SortDirection = "asc" | "desc";
 type PitchSortKey =
@@ -494,6 +495,9 @@ function App() {
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("checking");
   const [statusText, setStatusText] = useState("Checking backend...");
   const [activeView, setActiveView] = useState<ActiveView>("explorer");
+  const [theme, setTheme] = useState<ThemeMode>(() =>
+    window.localStorage.getItem("relay.theme") === "dark" ? "dark" : "light",
+  );
   const [filters, setFilters] = useState<PitchFilters>(initialFilters);
   const [results, setResults] = useState<PitchResult[]>([]);
   const [resultCount, setResultCount] = useState(0);
@@ -557,6 +561,12 @@ function App() {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("relay.theme", theme);
+    window.dispatchEvent(new CustomEvent("relay-theme-change"));
+  }, [theme]);
 
   useEffect(() => {
     const stored = window.localStorage.getItem("relay.savedComparisons");
@@ -1534,9 +1544,18 @@ function App() {
           <h1>Relay</h1>
           <p>Baseball analytics for exploring Statcast pitch data</p>
         </div>
-        <div className={`status-pill status-pill--${backendStatus}`}>
-          <span className="status-dot" />
-          <span>{statusText}</span>
+        <div className="header-actions">
+          <button
+            className="theme-toggle"
+            onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+            type="button"
+          >
+            {theme === "dark" ? "Light" : "Dark"}
+          </button>
+          <div className={`status-pill status-pill--${backendStatus}`}>
+            <span className="status-dot" />
+            <span>{statusText}</span>
+          </div>
         </div>
       </header>
 

@@ -214,9 +214,12 @@ function drawDeltaCanvas(
   context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   context.clearRect(0, 0, width, height);
 
-  context.fillStyle = "#f7f9fb";
+  const rootStyles = getComputedStyle(document.documentElement);
+  context.fillStyle =
+    rootStyles.getPropertyValue("--relay-surface-soft").trim() || "#f7f9fb";
   context.fillRect(padding, padding, plotWidth, plotHeight);
-  context.strokeStyle = "#d9dee7";
+  context.strokeStyle =
+    rootStyles.getPropertyValue("--relay-border").trim() || "#d9dee7";
   context.lineWidth = 1;
   context.strokeRect(padding, padding, plotWidth, plotHeight);
 
@@ -334,6 +337,16 @@ function CompareDeltaHeatmap({
   useEffect(() => {
     if (!canvasRef.current || !baseHeatmap) return;
     drawDeltaCanvas(canvasRef.current, baseHeatmap, deltaCells, maxAbsDelta);
+  }, [baseHeatmap, deltaCells, maxAbsDelta]);
+
+  useEffect(() => {
+    function redrawForTheme() {
+      if (!canvasRef.current || !baseHeatmap) return;
+      drawDeltaCanvas(canvasRef.current, baseHeatmap, deltaCells, maxAbsDelta);
+    }
+
+    window.addEventListener("relay-theme-change", redrawForTheme);
+    return () => window.removeEventListener("relay-theme-change", redrawForTheme);
   }, [baseHeatmap, deltaCells, maxAbsDelta]);
 
   function updateHover(event: PointerEvent<SVGSVGElement>) {

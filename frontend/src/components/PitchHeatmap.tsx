@@ -149,12 +149,17 @@ function drawHeatmapCanvas(
   context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   context.clearRect(0, 0, width, height);
 
+  const rootStyles = getComputedStyle(document.documentElement);
+  const surface = rootStyles.getPropertyValue("--relay-surface").trim() || "#fbfcfd";
+  const surfaceSoft =
+    rootStyles.getPropertyValue("--relay-surface-soft").trim() || "#f0f4f7";
+  const border = rootStyles.getPropertyValue("--relay-border").trim() || "#d9dee7";
   const background = context.createLinearGradient(0, padding, 0, height - padding);
-  background.addColorStop(0, "#fbfcfd");
-  background.addColorStop(1, "#f0f4f7");
+  background.addColorStop(0, surface);
+  background.addColorStop(1, surfaceSoft);
   context.fillStyle = background;
   context.fillRect(padding, padding, plotWidth, plotHeight);
-  context.strokeStyle = "#d9dee7";
+  context.strokeStyle = border;
   context.lineWidth = 1;
   context.strokeRect(padding, padding, plotWidth, plotHeight);
 
@@ -369,6 +374,16 @@ function PitchHeatmap({
   useEffect(() => {
     if (!canvasRef.current || !heatmap) return;
     drawHeatmapCanvas(canvasRef.current, heatmap, mode);
+  }, [heatmap, mode]);
+
+  useEffect(() => {
+    function redrawForTheme() {
+      if (!canvasRef.current || !heatmap) return;
+      drawHeatmapCanvas(canvasRef.current, heatmap, mode);
+    }
+
+    window.addEventListener("relay-theme-change", redrawForTheme);
+    return () => window.removeEventListener("relay-theme-change", redrawForTheme);
   }, [heatmap, mode]);
 
   useEffect(() => {
