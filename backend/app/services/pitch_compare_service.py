@@ -1,14 +1,18 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date
 from pathlib import Path
 from typing import Any
 
+from app.db.statcast import (
+    is_known_pitch_type,
+    resolve_statcast_parquet,
+    statcast_connection,
+    table_columns,
+)
 from app.services.pitch_query_service import (
     DEFAULT_STATCAST_PARQUET,
-    LEGACY_STATCAST_PARQUET,
-    _duckdb_string_literal,
     _rows_to_dicts,
 )
 
@@ -61,6 +65,27 @@ def _average_by_pitch_type(values: dict[str, list[float]]) -> dict[str, float]:
     }
 
 
+def _average(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _most_common_hand(values: list[str]) -> str | None:
+    if not values:
+        return None
+    return Counter(values).most_common(1)[0][0]
+
+
+def _statcast_arm_angle(pitch: dict[str, Any]) -> float | None:
+    # Statcast exposes arm_angle directly. Release position is not equivalent
+    # to arm angle, so Relay only reports this metric when the real field exists.
+    arm_angle = pitch.get("arm_angle")
+    if arm_angle is None:
+        return None
+    return float(arm_angle)
+
+
 def _summarize_period(pitches: list[dict[str, Any]]) -> dict[str, Any]:
     pitch_count = len(pitches)
     pitch_type_counts: dict[str, int] = defaultdict(int)
@@ -71,14 +96,20 @@ def _summarize_period(pitches: list[dict[str, Any]]) -> dict[str, Any]:
     spin_by_pitch_type: dict[str, list[float]] = defaultdict(list)
     ivb_by_pitch_type: dict[str, list[float]] = defaultdict(list)
     horizontal_break_by_pitch_type: dict[str, list[float]] = defaultdict(list)
+    arm_angle_by_pitch_type: dict[str, list[float]] = defaultdict(list)
 
     strike_count = 0
     whiff_count = 0
     located_pitch_count = 0
     zone_pitch_count = 0
+    pitcher_hands: list[str] = []
+    arm_angles: list[float] = []
 
     for pitch in pitches:
-        pitch_type = pitch.get("pitch_type") or "Unknown"
+        if not is_known_pitch_type(pitch.get("pitch_type")):
+            continue
+
+        pitch_type = str(pitch["pitch_type"]).strip()
         pitch_type_counts[pitch_type] += 1
 
         release_speed = pitch.get("release_speed")
@@ -99,6 +130,11 @@ def _summarize_period(pitches: list[dict[str, Any]]) -> dict[str, Any]:
         if pfx_x is not None:
             horizontal_break_by_pitch_type[pitch_type].append(pfx_x * 12)
 
+        arm_angle = _statcast_arm_angle(pitch)
+        if arm_angle is not None:
+            arm_angle_by_pitch_type[pitch_type].append(arm_angle)
+            arm_angles.append(arm_angle)
+
         # Statcast descriptions are pitch outcomes. For this first pass, strike
         # rate is the share of pitches whose description is a called strike,
         # swinging strike, foul, bunt foul, or foul tip.
@@ -115,6 +151,11 @@ def _summarize_period(pitches: list[dict[str, Any]]) -> dict[str, Any]:
             if _is_in_zone(pitch):
                 zone_pitch_count += 1
 
+        p_throws = pitch.get("p_throws")
+        if p_throws in {"L", "R"}:
+            pitcher_hands.append(p_throws)
+
+    pitch_count = sum(pitch_type_counts.values())
     pitch_usage = {
         pitch_type: {
             "count": count,
@@ -132,9 +173,12 @@ def _summarize_period(pitches: list[dict[str, Any]]) -> dict[str, Any]:
         "average_horizontal_break": _average_by_pitch_type(
             horizontal_break_by_pitch_type
         ),
+        "average_arm_angle": _average_by_pitch_type(arm_angle_by_pitch_type),
+        "arm_angle": _average(arm_angles),
         "strike_rate": _rate(strike_count, pitch_count),
         "whiff_rate": _rate(whiff_count, pitch_count),
         "zone_rate": _rate(zone_pitch_count, located_pitch_count),
+        "pitcher_hand": _most_common_hand(pitcher_hands),
     }
 
 
@@ -178,6 +222,8 @@ def _period_delta(
             "average_induced_vertical_break"
         ),
         "average_horizontal_break": metric_delta("average_horizontal_break"),
+        "average_arm_angle": metric_delta("average_arm_angle"),
+        "arm_angle": _delta(period_a["arm_angle"], period_b["arm_angle"]),
         "strike_rate": _delta(period_a["strike_rate"], period_b["strike_rate"]),
         "whiff_rate": _delta(period_a["whiff_rate"], period_b["whiff_rate"]),
         "zone_rate": _delta(period_a["zone_rate"], period_b["zone_rate"]),
@@ -189,21 +235,29 @@ def _fetch_period_pitches(
     start_date: date,
     end_date: date,
     parquet_path: Path,
+    pitch_type: str | None = None,
+    batter_hand: str | None = None,
 ) -> list[dict[str, Any]]:
-    try:
-        import duckdb
-    except ImportError as exc:
-        raise RuntimeError(
-            "duckdb is not installed. Run `pip install -r backend/requirements.txt`."
-        ) from exc
+    with statcast_connection(parquet_path) as connection:
+        columns = table_columns(connection)
+        arm_angle_select = "arm_angle" if "arm_angle" in columns else "NULL AS arm_angle"
+        where_clauses = ["pitcher = ?", "game_date BETWEEN ? AND ?"]
+        params: list[Any] = [pitcher_id, start_date.isoformat(), end_date.isoformat()]
 
-    with duckdb.connect() as connection:
+        if pitch_type:
+            where_clauses.append("pitch_type = ?")
+            params.append(pitch_type)
+        if batter_hand:
+            where_clauses.append("stand = ?")
+            params.append(batter_hand)
+
         cursor = connection.execute(
             "SELECT pitch_type, release_speed, release_spin_rate, pfx_x, pfx_z, "
-            "description, plate_x, plate_z "
-            f"FROM read_parquet({_duckdb_string_literal(str(parquet_path))}) "
-            "WHERE pitcher = ? AND game_date BETWEEN ? AND ?",
-            [pitcher_id, start_date.isoformat(), end_date.isoformat()],
+            "description, plate_x, plate_z, p_throws, "
+            f"{arm_angle_select} "
+            "FROM statcast_pitches "
+            f"WHERE {' AND '.join(where_clauses)}",
+            params,
         )
         columns = [description[0] for description in cursor.description]
         return _rows_to_dicts(columns, cursor.fetchall())
@@ -213,24 +267,10 @@ def resolve_pitcher_id_from_cache(
     pitcher_name: str,
     parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
 ) -> int:
-    try:
-        import duckdb
-    except ImportError as exc:
-        raise RuntimeError(
-            "duckdb is not installed. Run `pip install -r backend/requirements.txt`."
-        ) from exc
-
-    parquet_path = Path(parquet_path)
-    if parquet_path == DEFAULT_STATCAST_PARQUET and not parquet_path.exists():
-        parquet_path = LEGACY_STATCAST_PARQUET
-
-    if not parquet_path.exists():
-        raise FileNotFoundError(f"Statcast parquet file not found: {parquet_path}")
-
-    with duckdb.connect() as connection:
+    with statcast_connection(parquet_path) as connection:
         cursor = connection.execute(
             "SELECT DISTINCT pitcher, player_name "
-            f"FROM read_parquet({_duckdb_string_literal(str(parquet_path))}) "
+            "FROM statcast_pitches "
             "WHERE LOWER(player_name) LIKE ? "
             "ORDER BY player_name",
             [f"%{pitcher_name.lower()}%"],
@@ -254,23 +294,40 @@ def compare_pitcher_periods(
     b_start: date,
     b_end: date,
     parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
+    pitch_type: str | None = None,
+    batter_hand: str | None = None,
 ) -> dict[str, Any]:
-    parquet_path = Path(parquet_path)
-    if parquet_path == DEFAULT_STATCAST_PARQUET and not parquet_path.exists():
-        parquet_path = LEGACY_STATCAST_PARQUET
-
-    if not parquet_path.exists():
-        raise FileNotFoundError(f"Statcast parquet file not found: {parquet_path}")
+    parquet_path = resolve_statcast_parquet(parquet_path)
 
     period_a = _summarize_period(
-        _fetch_period_pitches(pitcher_id, a_start, a_end, parquet_path)
+        _fetch_period_pitches(
+            pitcher_id,
+            a_start,
+            a_end,
+            parquet_path,
+            pitch_type=pitch_type,
+            batter_hand=batter_hand,
+        )
     )
     period_b = _summarize_period(
-        _fetch_period_pitches(pitcher_id, b_start, b_end, parquet_path)
+        _fetch_period_pitches(
+            pitcher_id,
+            b_start,
+            b_end,
+            parquet_path,
+            pitch_type=pitch_type,
+            batter_hand=batter_hand,
+        )
     )
+    pitcher_hand = period_a.get("pitcher_hand") or period_b.get("pitcher_hand")
 
     return {
         "pitcher_id": pitcher_id,
+        "pitcher_hand": pitcher_hand,
+        "filters": {
+            "pitch_type": pitch_type,
+            "batter_hand": batter_hand,
+        },
         "period_a": {
             "start": a_start.isoformat(),
             "end": a_end.isoformat(),

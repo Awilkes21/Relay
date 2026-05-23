@@ -33,6 +33,8 @@ class PitchCompareServiceTests(unittest.TestCase):
                     "description": "called_strike",
                     "plate_x": 0.0,
                     "plate_z": 2.5,
+                    "p_throws": "R",
+                    "arm_angle": 48.0,
                 },
                 {
                     "pitch_type": "FF",
@@ -43,6 +45,8 @@ class PitchCompareServiceTests(unittest.TestCase):
                     "description": "swinging_strike",
                     "plate_x": 1.5,
                     "plate_z": 2.5,
+                    "p_throws": "R",
+                    "arm_angle": 50.0,
                 },
                 {
                     "pitch_type": "SL",
@@ -53,6 +57,8 @@ class PitchCompareServiceTests(unittest.TestCase):
                     "description": "ball",
                     "plate_x": None,
                     "plate_z": None,
+                    "p_throws": "R",
+                    "arm_angle": 35.0,
                 },
             ]
         )
@@ -67,9 +73,43 @@ class PitchCompareServiceTests(unittest.TestCase):
         self.assertEqual(summary["average_spin_rate"]["SL"], 2500)
         self.assertAlmostEqual(summary["average_induced_vertical_break"]["FF"], 19.2)
         self.assertEqual(summary["average_horizontal_break"]["SL"], 3.0)
+        self.assertEqual(summary["average_arm_angle"]["FF"], 49.0)
+        self.assertEqual(summary["arm_angle"], 44.333333333333336)
         self.assertAlmostEqual(summary["strike_rate"], 2 / 3)
         self.assertAlmostEqual(summary["whiff_rate"], 1 / 3)
         self.assertAlmostEqual(summary["zone_rate"], 1 / 2)
+        self.assertEqual(summary["pitcher_hand"], "R")
+
+    def test_summarize_period_ignores_unknown_pitch_types(self):
+        summary = _summarize_period(
+            [
+                {
+                    "pitch_type": "FF",
+                    "release_speed": 96.0,
+                    "description": "called_strike",
+                    "plate_x": 0.0,
+                    "plate_z": 2.5,
+                },
+                {
+                    "pitch_type": "UN",
+                    "release_speed": 80.0,
+                    "description": "ball",
+                    "plate_x": 0.0,
+                    "plate_z": 2.5,
+                },
+                {
+                    "pitch_type": None,
+                    "release_speed": 82.0,
+                    "description": "ball",
+                    "plate_x": 0.0,
+                    "plate_z": 2.5,
+                },
+            ]
+        )
+
+        self.assertEqual(summary["pitch_count"], 1)
+        self.assertEqual(list(summary["pitch_usage"].keys()), ["FF"])
+        self.assertEqual(summary["average_velocity"], {"FF": 96.0})
 
     def test_builds_period_deltas(self):
         period_a = _summarize_period(
@@ -83,6 +123,7 @@ class PitchCompareServiceTests(unittest.TestCase):
                     "description": "called_strike",
                     "plate_x": 0.0,
                     "plate_z": 2.5,
+                    "arm_angle": 45.0,
                 }
             ]
         )
@@ -97,6 +138,7 @@ class PitchCompareServiceTests(unittest.TestCase):
                     "description": "ball",
                     "plate_x": 2.0,
                     "plate_z": 2.5,
+                    "arm_angle": 48.0,
                 },
                 {
                     "pitch_type": "SL",
@@ -107,6 +149,7 @@ class PitchCompareServiceTests(unittest.TestCase):
                     "description": "swinging_strike",
                     "plate_x": 0.0,
                     "plate_z": 2.5,
+                    "arm_angle": 35.0,
                 },
             ]
         )
@@ -121,6 +164,8 @@ class PitchCompareServiceTests(unittest.TestCase):
         self.assertEqual(deltas["average_spin_rate"]["FF"], 200)
         self.assertEqual(deltas["average_induced_vertical_break"]["FF"], 3.0)
         self.assertEqual(deltas["average_horizontal_break"]["FF"], 3.0)
+        self.assertEqual(deltas["average_arm_angle"]["FF"], 3.0)
+        self.assertEqual(deltas["arm_angle"], -3.5)
         self.assertEqual(deltas["strike_rate"], -0.5)
         self.assertEqual(deltas["whiff_rate"], 0.5)
         self.assertEqual(deltas["zone_rate"], -0.5)

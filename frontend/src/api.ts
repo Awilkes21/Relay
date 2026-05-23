@@ -49,6 +49,7 @@ export type PitchResult = {
   release_spin_rate: number | null;
   release_pos_x: number | null;
   release_pos_z: number | null;
+  arm_angle: number | null;
   pfx_x: number | null;
   pfx_z: number | null;
   plate_x: number | null;
@@ -145,8 +146,12 @@ export type PitchHeatmapResponse = {
 export type CompareFilters = {
   pitcher_id: string;
   pitcher_name: string;
+  pitch_type: string;
+  batter_hand: string;
+  a_game: string;
   a_start: string;
   a_end: string;
+  b_game: string;
   b_start: string;
   b_end: string;
 };
@@ -163,9 +168,12 @@ export type PeriodMetrics = {
   average_spin_rate: Record<string, number>;
   average_induced_vertical_break: Record<string, number>;
   average_horizontal_break: Record<string, number>;
+  average_arm_angle: Record<string, number>;
+  arm_angle: number | null;
   strike_rate: number | null;
   whiff_rate: number | null;
   zone_rate: number | null;
+  pitcher_hand: string | null;
 };
 
 export type CompareDelta = {
@@ -175,6 +183,8 @@ export type CompareDelta = {
   average_spin_rate: Record<string, number | null>;
   average_induced_vertical_break: Record<string, number | null>;
   average_horizontal_break: Record<string, number | null>;
+  average_arm_angle: Record<string, number | null>;
+  arm_angle: number | null;
   strike_rate: number | null;
   whiff_rate: number | null;
   zone_rate: number | null;
@@ -182,6 +192,11 @@ export type CompareDelta = {
 
 export type PitcherCompareResponse = {
   pitcher_id: number;
+  pitcher_hand: string | null;
+  filters: {
+    pitch_type: string | null;
+    batter_hand: string | null;
+  };
   period_a: {
     start: string;
     end: string;
@@ -321,7 +336,7 @@ export async function comparePitcher(
 
   Object.entries(filters).forEach(([key, value]) => {
     const trimmedValue = value.trim();
-    if (trimmedValue) {
+    if (trimmedValue && key !== "a_game" && key !== "b_game") {
       params.set(key, trimmedValue);
     }
   });

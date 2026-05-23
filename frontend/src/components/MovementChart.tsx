@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { PitchResult } from "../api";
+import { formatPitchType } from "../pitchTypes";
 
 type MovementChartProps = {
   pitches: PitchResult[];
@@ -8,7 +9,7 @@ type MovementChartProps = {
 type PlottedMovementPitch = PitchResult & {
   horizontalBreak: number;
   inducedVerticalBreak: number;
-  armSlot: number | null;
+  armAngle: number | null;
 };
 
 const width = 560;
@@ -62,13 +63,8 @@ function horizontalSideLabels(handedness: string | null) {
   return { left: "Pitcher Left", right: "Pitcher Right" };
 }
 
-function estimateArmSlot(pitch: PitchResult) {
-  if (pitch.release_pos_x === null || pitch.release_pos_z === null) return null;
-  return (Math.atan2(Math.abs(pitch.release_pos_x), pitch.release_pos_z) * 180) / Math.PI;
-}
-
-function formatArmSlot(angle: number | null) {
-  return angle === null ? "Arm slot: unavailable" : `Arm slot: ${angle.toFixed(0)} deg est.`;
+function formatArmAngle(angle: number | null) {
+  return angle === null ? "Arm angle: unavailable" : `Arm angle: ${angle.toFixed(0)} deg`;
 }
 
 function formatDetail(value: string | number | null) {
@@ -83,6 +79,26 @@ function formatSpin(value: number | null) {
   return value === null ? "-" : `${Math.round(value)} rpm`;
 }
 
+function average(values: number[]) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+function armAngleLine(
+  angle: number | null,
+  handedness: string | null,
+  centerX: number,
+  centerY: number,
+  radius: number,
+) {
+  if (angle === null) return null;
+  const direction = handedness === "L" ? -1 : 1;
+  const radians = (angle * Math.PI) / 180;
+  return {
+    x2: centerX + Math.cos(radians) * radius * direction,
+    y2: centerY - Math.sin(radians) * radius,
+  };
+}
+
 function MovementChart({ pitches }: MovementChartProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedPitch, setSelectedPitch] = useState<PlottedMovementPitch | null>(null);
@@ -94,7 +110,7 @@ function MovementChart({ pitches }: MovementChartProps) {
       ...pitch,
       horizontalBreak: pitcherViewHorizontalBreak(pitch.pfx_x ?? 0),
       inducedVerticalBreak: (pitch.pfx_z ?? 0) * 12,
-      armSlot: estimateArmSlot(pitch),
+      armAngle: pitch.arm_angle,
     }));
   const maxMovement = plottedPitches.reduce(
     (currentMax, pitch) =>
@@ -111,10 +127,33 @@ function MovementChart({ pitches }: MovementChartProps) {
   const plotRadius = (width - padding * 2) / 2;
   const ringValues = [10, 20, 30].filter((value) => value < domainMax);
   const ringValuesWithOuter = [...ringValues, domainMax];
+  const averageArmSlot = average(
+    plottedPitches
+      .map((pitch) => pitch.armAngle)
+      .filter((angle): angle is number => angle !== null),
+  );
+  const armSlotLine = armAngleLine(
+    averageArmSlot,
+    handedness,
+    centerX,
+    centerY,
+    plotRadius,
+  );
 
   useEffect(() => {
     setSelectedPitch(null);
   }, [pitches]);
+
+  useEffect(() => {
+    function clearSelection(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setSelectedPitch(null);
+      }
+    }
+
+    window.addEventListener("keydown", clearSelection);
+    return () => window.removeEventListener("keydown", clearSelection);
+  }, []);
 
   return (
     <section
@@ -209,6 +248,24 @@ function MovementChart({ pitches }: MovementChartProps) {
           <text className="plot-label movement-label movement-label--right" x={width - 8} y={centerY}>
             {sideLabels.right}
           </text>
+          {armSlotLine ? (
+            <g>
+              <line
+                className="movement-arm-angle-line"
+                x1={centerX}
+                x2={armSlotLine.x2}
+                y1={centerY}
+                y2={armSlotLine.y2}
+              />
+              <text
+                className="plot-label movement-arm-angle-label"
+                x={armSlotLine.x2}
+                y={armSlotLine.y2 - 8}
+              >
+                Arm {formatNumber(averageArmSlot, 0)} deg
+              </text>
+            </g>
+          ) : null}
           {plottedPitches.map((pitch, index) => {
             return (
               <circle
@@ -221,10 +278,12 @@ function MovementChart({ pitches }: MovementChartProps) {
                 cy={scaleY(pitch.inducedVerticalBreak, domainMax)}
                 fill={pitchColor(pitch.pitch_type)}
                 key={`${pitch.horizontalBreak}-${pitch.inducedVerticalBreak}-${index}`}
-                onClick={() => setSelectedPitch(pitch)}
+                onClick={() =>
+                  setSelectedPitch((current) => (current === pitch ? null : pitch))
+                }
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
-                    setSelectedPitch(pitch);
+                    setSelectedPitch((current) => (current === pitch ? null : pitch));
                   }
                 }}
                 r="5"
@@ -232,12 +291,12 @@ function MovementChart({ pitches }: MovementChartProps) {
               >
                 <title>
                   {[
-                    `Pitch: ${pitch.pitch_type ?? ""}`,
+                    `Pitch: ${formatPitchType(pitch.pitch_type)}`,
                     `Horizontal: ${pitch.horizontalBreak.toFixed(1)} in (pitcher view)`,
                     `Vertical: ${pitch.inducedVerticalBreak.toFixed(1)} in`,
                     `Velocity: ${pitch.release_speed ?? ""}`,
                     `Throws: ${pitch.p_throws ?? ""}`,
-                    formatArmSlot(pitch.armSlot),
+                    formatArmAngle(pitch.armAngle),
                   ].join("\n")}
                 </title>
               </circle>
@@ -250,10 +309,14 @@ function MovementChart({ pitches }: MovementChartProps) {
       </div>
 
       {selectedPitch ? (
-        <div className="pitch-detail-panel">
+        <div className="pitch-detail-panel selection-panel">
+          <div className="selection-panel-header">
+            <span>Selected Pitch</span>
+            <strong>{formatPitchType(selectedPitch.pitch_type)}</strong>
+          </div>
           <div>
             <span>Pitch</span>
-            <strong>{formatDetail(selectedPitch.pitch_type)}</strong>
+            <strong>{formatPitchType(selectedPitch.pitch_type)}</strong>
           </div>
           <div>
             <span>Velocity</span>
@@ -272,11 +335,11 @@ function MovementChart({ pitches }: MovementChartProps) {
             <strong>{selectedPitch.inducedVerticalBreak.toFixed(1)} in</strong>
           </div>
           <div>
-            <span>Arm Slot</span>
+            <span>Arm Angle</span>
             <strong>
-              {selectedPitch.armSlot === null
+              {selectedPitch.armAngle === null
                 ? "Unavailable"
-                : `${formatNumber(selectedPitch.armSlot, 0)} deg est.`}
+                : `${formatNumber(selectedPitch.armAngle, 0)} deg`}
             </strong>
           </div>
           <div>
@@ -288,11 +351,11 @@ function MovementChart({ pitches }: MovementChartProps) {
             <strong>Pitcher</strong>
           </div>
           <button
-            className="detail-close-button"
+            className="detail-close-button clear-selection-button"
             onClick={() => setSelectedPitch(null)}
             type="button"
           >
-            Clear
+            Clear Selection
           </button>
         </div>
       ) : null}

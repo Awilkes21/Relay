@@ -249,3 +249,4 @@ data/raw/
 data/processed/
 data/*.parquet
 data/*.db
+data/*manifest*.json

@@ -17,9 +17,9 @@ import {
   getPitchers,
   searchPitches,
 } from "./api";
-import MovementChart from "./components/MovementChart";
-import PitchHeatmap from "./components/PitchHeatmap";
-import StrikeZoneChart from "./components/StrikeZoneChart";
+import PitchExplorerView from "./views/PitchExplorerView";
+import CompareView from "./views/CompareView";
+import { formatPitchType, formatPitchTypeWithCode } from "./pitchTypes";
 import "./App.css";
 
 type BackendStatus = "checking" | "connected" | "error";
@@ -91,6 +91,10 @@ const filterFields = [
 
 type FilterField = (typeof filterFields)[number];
 
+function pitchField(name: FilterField["name"]) {
+  return filterFields.find((field) => field.name === name)!;
+}
+
 const filterGroups: Array<{ title: string; fields: FilterField[] }> = [
   {
     title: "Pitcher",
@@ -144,17 +148,23 @@ const emptyPitchOptions: PitchFilterOptions = {
 const initialCompareFilters: CompareFilters = {
   pitcher_id: "",
   pitcher_name: "",
+  pitch_type: "",
+  batter_hand: "",
+  a_game: "",
   a_start: "",
   a_end: "",
+  b_game: "",
   b_start: "",
   b_end: "",
 };
 
 const compareFields = [
-  { name: "a_start", label: "Period A Start", type: "date", required: true },
-  { name: "a_end", label: "Period A End", type: "date", required: true },
-  { name: "b_start", label: "Period B Start", type: "date", required: true },
-  { name: "b_end", label: "Period B End", type: "date", required: true },
+  { name: "a_game", label: "Period 1 Game", type: "select", required: false },
+  { name: "a_start", label: "Period 1 Start", type: "date", required: true },
+  { name: "a_end", label: "Period 1 End", type: "date", required: true },
+  { name: "b_game", label: "Period 2 Game", type: "select", required: false },
+  { name: "b_start", label: "Period 2 Start", type: "date", required: true },
+  { name: "b_end", label: "Period 2 End", type: "date", required: true },
 ] as const;
 
 const descriptionLabels: Record<string, string> = {
@@ -199,6 +209,8 @@ const battedBallLabels: Record<string, string> = {
   popup: "Popup",
 };
 
+const whiffDescriptions = new Set(["swinging_strike", "swinging_strike_blocked"]);
+
 function formatValue(value: string | number | null | undefined) {
   return value ?? "";
 }
@@ -223,6 +235,30 @@ function formatShortDate(value: string | null | undefined) {
     day: "numeric",
     year: "numeric",
   }).format(date);
+}
+
+function formatDateRange(start: string | null | undefined, end: string | null | undefined) {
+  return `${formatDate(start)} to ${formatDate(end)}`;
+}
+
+function formatShortDateRange(start: string | null | undefined, end: string | null | undefined) {
+  if (!start || !end) return "";
+  const startDate = dateFromIso(start);
+  const endDate = dateFromIso(end);
+
+  if (
+    !Number.isNaN(startDate.getTime()) &&
+    !Number.isNaN(endDate.getTime()) &&
+    startDate.getFullYear() === endDate.getFullYear()
+  ) {
+    const monthDay = new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+    return `${monthDay.format(startDate)} - ${monthDay.format(endDate)}, ${endDate.getFullYear()}`;
+  }
+
+  return `${formatShortDate(start)} - ${formatShortDate(end)}`;
 }
 
 function formatNumber(value: number | null | undefined, digits = 1) {
@@ -263,6 +299,39 @@ function formatDelta(value: number | null | undefined, kind: "rate" | "number") 
   return kind === "rate"
     ? `${sign}${(value * 100).toFixed(1)} pts`
     : `${sign}${value.toFixed(1)}`;
+}
+
+function rateFromPitches(pitches: PitchResult[], predicate: (pitch: PitchResult) => boolean) {
+  if (pitches.length === 0) return null;
+  return pitches.filter(predicate).length / pitches.length;
+}
+
+function zoneRateFromPitches(pitches: PitchResult[]) {
+  const locatedPitches = pitches.filter(
+    (pitch) => pitch.plate_x !== null && pitch.plate_z !== null,
+  );
+  if (locatedPitches.length === 0) return null;
+
+  return (
+    locatedPitches.filter(
+      (pitch) =>
+        pitch.plate_x !== null &&
+        pitch.plate_z !== null &&
+        Math.abs(pitch.plate_x) <= 0.83 &&
+        pitch.plate_z >= 1.5 &&
+        pitch.plate_z <= 3.5,
+    ).length / locatedPitches.length
+  );
+}
+
+function whiffRateFromPitches(pitches: PitchResult[]) {
+  return rateFromPitches(pitches, (pitch) =>
+    pitch.description ? whiffDescriptions.has(pitch.description) : false,
+  );
+}
+
+function rateDelta(period1Rate: number | null, period2Rate: number | null) {
+  return period1Rate === null || period2Rate === null ? null : period2Rate - period1Rate;
 }
 
 function titleCaseCode(value: string) {
@@ -392,6 +461,8 @@ function collectPitchTypes(comparison: PitcherCompareResponse) {
       ...Object.keys(comparison.period_b.metrics.average_induced_vertical_break),
       ...Object.keys(comparison.period_a.metrics.average_horizontal_break),
       ...Object.keys(comparison.period_b.metrics.average_horizontal_break),
+      ...Object.keys(comparison.period_a.metrics.average_arm_angle),
+      ...Object.keys(comparison.period_b.metrics.average_arm_angle),
     ]),
   ).sort();
 }
@@ -404,7 +475,11 @@ function largestDeltaLabel(
     .filter((entry): entry is [string, number] => entry[1] !== null && entry[1] !== undefined)
     .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0];
 
-  return largest ? `${largest[0]} ${formatDelta(largest[1], kind)}` : "-";
+  return largest ? `${formatPitchType(largest[0])} ${formatDelta(largest[1], kind)}` : "-";
+}
+
+function averageNumbers(values: number[]) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 }
 
 function App() {
@@ -428,6 +503,7 @@ function App() {
   const [pitchers, setPitchers] = useState<CachedPitcher[]>([]);
   const [pitcherError, setPitcherError] = useState<string | null>(null);
   const [pitchOptions, setPitchOptions] = useState<PitchFilterOptions>(emptyPitchOptions);
+  const [compareOptions, setCompareOptions] = useState<PitchFilterOptions>(emptyPitchOptions);
   const [pitchOptionsError, setPitchOptionsError] = useState<string | null>(null);
   const [compareFilters, setCompareFilters] = useState<CompareFilters>(
     initialCompareFilters,
@@ -438,6 +514,14 @@ function App() {
   const [isComparing, setIsComparing] = useState(false);
   const [compareError, setCompareError] = useState<string | null>(null);
   const [comparePitchTypes, setComparePitchTypes] = useState<string[]>([]);
+  const [compareHeatmapA, setCompareHeatmapA] = useState<PitchHeatmapResponse | null>(null);
+  const [compareHeatmapB, setCompareHeatmapB] = useState<PitchHeatmapResponse | null>(null);
+  const [compareHeatmapMode, setCompareHeatmapMode] = useState<HeatmapMode>("all");
+  const [isCompareHeatmapLoading, setIsCompareHeatmapLoading] = useState(false);
+  const [drilldownPitchType, setDrilldownPitchType] = useState<string | null>(null);
+  const [drilldownA, setDrilldownA] = useState<PitchResult[]>([]);
+  const [drilldownB, setDrilldownB] = useState<PitchResult[]>([]);
+  const [isDrilldownLoading, setIsDrilldownLoading] = useState(false);
   const [savedComparisons, setSavedComparisons] = useState<SavedComparison[]>([]);
   const [comparisonName, setComparisonName] = useState("");
 
@@ -468,6 +552,19 @@ function App() {
   useEffect(() => {
     const stored = window.localStorage.getItem("relay.savedComparisons");
     setSavedComparisons(stored ? JSON.parse(stored) : []);
+  }, []);
+
+  useEffect(() => {
+    function clearSelection(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setDrilldownPitchType(null);
+        setDrilldownA([]);
+        setDrilldownB([]);
+      }
+    }
+
+    window.addEventListener("keydown", clearSelection);
+    return () => window.removeEventListener("keydown", clearSelection);
   }, []);
 
   useEffect(() => {
@@ -551,6 +648,25 @@ function App() {
       return changed ? nextFilters : currentFilters;
     });
   }, [pitchOptions.pitch_types, pitchOptions.batter_hands]);
+
+  useEffect(() => {
+    const pitcher = resolvableComparePitcher();
+    if (!pitcher) {
+      setCompareOptions(emptyPitchOptions);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      getPitchFilterOptions({
+        pitcher_id: String(pitcher.pitcher),
+        pitcher_name: pitcher.player_name,
+      })
+        .then((options) => setCompareOptions(options))
+        .catch(() => setCompareOptions(emptyPitchOptions));
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [compareFilters.pitcher_id, compareFilters.pitcher_name, pitchers]);
 
   function matchesPitcherInput(
     pitcher: CachedPitcher,
@@ -767,12 +883,20 @@ function App() {
       ...(name === "pitcher_name"
         ? {
             pitcher_id: "",
+            pitch_type: "",
+            batter_hand: "",
+            a_game: "",
             a_start: "",
             a_end: "",
+            b_game: "",
             b_start: "",
             b_end: "",
           }
         : {}),
+      ...(name === "a_game" ? { a_start: value, a_end: value } : {}),
+      ...(name === "b_game" ? { b_start: value, b_end: value } : {}),
+      ...(name === "a_start" || name === "a_end" ? { a_game: "" } : {}),
+      ...(name === "b_start" || name === "b_end" ? { b_game: "" } : {}),
     }));
   }
 
@@ -802,7 +926,7 @@ function App() {
     if (name === "pitch_type") {
       return pitchOptions.pitch_types.map((pitchType) => ({
         value: pitchType,
-        label: pitchType,
+        label: formatPitchTypeWithCode(pitchType),
       }));
     }
     if (name === "count") {
@@ -874,6 +998,7 @@ function App() {
     if (name === "description") return formatDescription(value);
     if (name === "events") return formatEvent(value);
     if (name === "single_game") return formatDate(value);
+    if (name === "pitch_type") return formatPitchTypeWithCode(value);
     if (name === "count") return value;
     if (name === "result_order") {
       return filterSelectOptions(name).find((option) => option.value === value)?.label ?? value;
@@ -923,6 +1048,10 @@ function App() {
   function compareFieldLabel(name: keyof CompareFilters) {
     if (name === "pitcher_name") return "Pitcher";
     if (name === "pitcher_id") return "Pitcher ID";
+    if (name === "pitch_type") return "Pitch Type";
+    if (name === "batter_hand") return "Batter Side";
+    if (name === "a_game") return "Period 1 Game";
+    if (name === "b_game") return "Period 2 Game";
     return compareFields.find((field) => field.name === name)?.label ?? name;
   }
 
@@ -932,12 +1061,28 @@ function App() {
       .map(([name, value]) => ({
         name,
         label: compareFieldLabel(name),
-        value,
+        value:
+          name === "batter_hand"
+            ? value === "L"
+              ? "Left"
+              : value === "R"
+                ? "Right"
+                : value
+            : name === "a_game" || name === "b_game"
+              ? formatDate(value)
+              : name === "a_start" || name === "a_end" || name === "b_start" || name === "b_end"
+                ? formatDate(value)
+              : value,
       }));
   }
 
   function removeCompareFilter(name: keyof CompareFilters) {
-    setCompareFilters((currentFilters) => ({ ...currentFilters, [name]: "" }));
+    setCompareFilters((currentFilters) => ({
+      ...currentFilters,
+      [name]: "",
+      ...(name === "a_game" ? { a_start: "", a_end: "" } : {}),
+      ...(name === "b_game" ? { b_start: "", b_end: "" } : {}),
+    }));
   }
 
   function clearCompareFilters() {
@@ -945,6 +1090,11 @@ function App() {
     setComparison(null);
     setCompareError(null);
     setComparePitchTypes([]);
+    setCompareHeatmapA(null);
+    setCompareHeatmapB(null);
+    setDrilldownPitchType(null);
+    setDrilldownA([]);
+    setDrilldownB([]);
   }
 
   function renderPitchFilterField(field: FilterField) {
@@ -1095,6 +1245,82 @@ function App() {
     }
   }
 
+  function comparePeriodPitchFilters(
+    filters: CompareFilters,
+    period: "a" | "b",
+    pitchTypeOverride?: string,
+  ): PitchFilters {
+    const pitcher = selectedPitcherForFilters(filters);
+    return {
+      pitcher_id: pitcher ? String(pitcher.pitcher) : filters.pitcher_id,
+      pitcher_name: filters.pitcher_name,
+      start_date: period === "a" ? filters.a_start : filters.b_start,
+      end_date: period === "a" ? filters.a_end : filters.b_end,
+      pitch_type: pitchTypeOverride ?? filters.pitch_type,
+      batter_hand: filters.batter_hand,
+      result_order: "latest",
+      limit: "500",
+    };
+  }
+
+  async function loadCompareHeatmaps(filters: CompareFilters, mode = compareHeatmapMode) {
+    setIsCompareHeatmapLoading(true);
+    try {
+      const [periodA, periodB] = await Promise.all([
+        getPitchHeatmap(comparePeriodPitchFilters(filters, "a"), mode),
+        getPitchHeatmap(comparePeriodPitchFilters(filters, "b"), mode),
+      ]);
+      setCompareHeatmapA(periodA);
+      setCompareHeatmapB(periodB);
+    } finally {
+      setIsCompareHeatmapLoading(false);
+    }
+  }
+
+  async function updateCompareHeatmapMode(mode: HeatmapMode) {
+    setCompareHeatmapMode(mode);
+    if (!comparison) return;
+
+    try {
+      await loadCompareHeatmaps(compareFilters, mode);
+    } catch (error) {
+      setCompareError(error instanceof Error ? error.message : "Compare heatmaps failed");
+    }
+  }
+
+  async function loadPitchTypeDrilldown(pitchType: string) {
+    if (drilldownPitchType === pitchType) {
+      setDrilldownPitchType(null);
+      setDrilldownA([]);
+      setDrilldownB([]);
+      return;
+    }
+
+    setDrilldownPitchType(pitchType);
+    setIsDrilldownLoading(true);
+    setCompareError(null);
+    try {
+      const [periodA, periodB] = await Promise.all([
+        searchPitches({
+          ...comparePeriodPitchFilters(compareFilters, "a", pitchType),
+          limit: "5000",
+        }),
+        searchPitches({
+          ...comparePeriodPitchFilters(compareFilters, "b", pitchType),
+          limit: "5000",
+        }),
+      ]);
+      setDrilldownA(periodA.results);
+      setDrilldownB(periodB.results);
+    } catch (error) {
+      setDrilldownA([]);
+      setDrilldownB([]);
+      setCompareError(error instanceof Error ? error.message : "Pitch drilldown failed");
+    } finally {
+      setIsDrilldownLoading(false);
+    }
+  }
+
   async function handleCompare(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const searchFilters = completePitcherName(compareFilters);
@@ -1117,8 +1343,14 @@ function App() {
       const response = await comparePitcher(searchFilters);
       setComparison(response);
       setComparePitchTypes(collectPitchTypes(response));
+      setDrilldownPitchType(null);
+      setDrilldownA([]);
+      setDrilldownB([]);
+      await loadCompareHeatmaps(searchFilters);
     } catch (error) {
       setComparison(null);
+      setCompareHeatmapA(null);
+      setCompareHeatmapB(null);
       setCompareError(
         error instanceof Error ? error.message : "Comparison failed",
       );
@@ -1127,29 +1359,55 @@ function App() {
     }
   }
 
-  const pitchTypes = comparison ? collectPitchTypes(comparison) : [];
-  const visiblePitchTypes =
-    comparePitchTypes.length > 0 ? pitchTypes.filter((pitchType) => comparePitchTypes.includes(pitchType)) : pitchTypes;
-  const topUsageDelta = comparison
-    ? largestDeltaLabel(
-        Object.fromEntries(
-          Object.entries(comparison.deltas.pitch_usage).map(([pitchType, metric]) => [
-            pitchType,
-            metric.rate,
-          ]),
-        ),
-        "rate",
-      )
-    : "-";
-  const topVelocityDelta = comparison
-    ? largestDeltaLabel(comparison.deltas.average_velocity, "number")
-    : "-";
-  const topSpinDelta = comparison
-    ? largestDeltaLabel(comparison.deltas.average_spin_rate, "number")
-    : "-";
-  const freshness = datasetFreshness();
-  const compareDateRange = compareDateRangePitcher();
-  const comparePitcherSelection = resolvableComparePitcher();
+  const pitchTypes = useMemo(
+    () => (comparison ? collectPitchTypes(comparison) : []),
+    [comparison],
+  );
+  const visiblePitchTypes = useMemo(
+    () =>
+      comparePitchTypes.length > 0
+        ? pitchTypes.filter((pitchType) => comparePitchTypes.includes(pitchType))
+        : pitchTypes,
+    [comparePitchTypes, pitchTypes],
+  );
+  const topUsageDelta = useMemo(
+    () =>
+      comparison
+        ? largestDeltaLabel(
+            Object.fromEntries(
+              Object.entries(comparison.deltas.pitch_usage).map(([pitchType, metric]) => [
+                pitchType,
+                metric.rate,
+              ]),
+            ),
+            "rate",
+          )
+        : "-",
+    [comparison],
+  );
+  const topVelocityDelta = useMemo(
+    () =>
+      comparison
+        ? largestDeltaLabel(comparison.deltas.average_velocity, "number")
+        : "-",
+    [comparison],
+  );
+  const topSpinDelta = useMemo(
+    () =>
+      comparison
+        ? largestDeltaLabel(comparison.deltas.average_spin_rate, "number")
+        : "-",
+    [comparison],
+  );
+  const freshness = useMemo(() => datasetFreshness(), [pitchers]);
+  const compareDateRange = useMemo(
+    () => compareDateRangePitcher(),
+    [compareFilters.pitcher_id, compareFilters.pitcher_name, pitchers],
+  );
+  const comparePitcherSelection = useMemo(
+    () => resolvableComparePitcher(),
+    [compareFilters.pitcher_id, compareFilters.pitcher_name, pitchers],
+  );
   const canCompare =
     Boolean(comparePitcherSelection) &&
     Boolean(
@@ -1169,30 +1427,40 @@ function App() {
       }),
     [results, pitchSort],
   );
-  const arsenalSummary = Array.from(
-    results.reduce((groups, pitch) => {
-      const pitchType = pitch.pitch_type ?? "Unknown";
-      const current = groups.get(pitchType) ?? {
-        pitchType,
-        count: 0,
-        velocity: [] as number[],
-        spin: [] as number[],
-        ivb: [] as number[],
-        hb: [] as number[],
-      };
-      current.count += 1;
-      if (pitch.release_speed !== null) current.velocity.push(pitch.release_speed);
-      if (pitch.release_spin_rate !== null) current.spin.push(pitch.release_spin_rate);
-      if (pitch.pfx_z !== null) current.ivb.push(pitch.pfx_z * 12);
-      if (pitch.pfx_x !== null) current.hb.push(pitch.pfx_x * 12);
-      groups.set(pitchType, current);
-      return groups;
-    }, new Map<string, { pitchType: string; count: number; velocity: number[]; spin: number[]; ivb: number[]; hb: number[] }>()),
-  )
-    .map((entry) => entry[1])
-    .sort((a, b) => b.count - a.count);
-  const avg = (values: number[]) =>
-    values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+  const arsenalSummary = useMemo(
+    () =>
+      Array.from(
+        results.reduce((groups, pitch) => {
+          const pitchType = pitch.pitch_type ?? "Unknown";
+          const current = groups.get(pitchType) ?? {
+            pitchType,
+            count: 0,
+            velocity: [] as number[],
+            spin: [] as number[],
+            ivb: [] as number[],
+            hb: [] as number[],
+          };
+          current.count += 1;
+          if (pitch.release_speed !== null) current.velocity.push(pitch.release_speed);
+          if (pitch.release_spin_rate !== null) current.spin.push(pitch.release_spin_rate);
+          if (pitch.pfx_z !== null) current.ivb.push(pitch.pfx_z * 12);
+          if (pitch.pfx_x !== null) current.hb.push(pitch.pfx_x * 12);
+          groups.set(pitchType, current);
+          return groups;
+        }, new Map<string, { pitchType: string; count: number; velocity: number[]; spin: number[]; ivb: number[]; hb: number[] }>()),
+      )
+        .map((entry) => entry[1])
+        .sort((a, b) => b.count - a.count),
+    [results],
+  );
+  const activePitchFilterList = useMemo(
+    () => activePitchFilters(),
+    [filters, pitchOptions],
+  );
+  const activeCompareFilterList = useMemo(
+    () => activeCompareFilters(),
+    [compareFilters],
+  );
 
   function saveCurrentComparison() {
     if (!comparisonName.trim()) return;
@@ -1256,718 +1524,110 @@ function App() {
         ))}
       </datalist>
 
-      {activeView === "explorer" ? (
-        <section className="page-section" aria-labelledby="pitch-explorer-title">
-        <div className="section-heading">
-          <h2 id="pitch-explorer-title">Pitch Explorer</h2>
-          <span>{API_URL}</span>
-        </div>
+      <PitchExplorerView
+        hidden={activeView !== "explorer"}
+        context={{
+          API_URL,
+          pitcherError,
+          pitchOptionsError,
+          selectedExplorerPitcher,
+          formatDate,
+          resolvableExplorerPitcher,
+          renderPitchFilterField,
+          pitchField,
+          activePitchFilterList,
+          removePitchFilter,
+          isSearching,
+          clearPitchFilters,
+          handleSearch,
+          searchError,
+          totalResultCount,
+          resultCount,
+          results,
+          downloadCsv,
+          formatBatter,
+          describePlateLocation,
+          formatBattedBall,
+          formatNumber,
+          averageNumbers,
+          arsenalSummary,
+          formatRate,
+          heatmap,
+          heatmapMode,
+          isHeatmapLoading,
+          updateHeatmapMode,
+          renderSortableHeader,
+          sortedResults,
+          formatValue,
+          formatBreak,
+          formatDescription,
+          formatEvent
+        }}
+      />
 
-        <form className="filter-panel" onSubmit={handleSearch}>
-          {pitcherError ? <div className="inline-note">{pitcherError}</div> : null}
-          {pitchOptionsError ? <div className="inline-note">{pitchOptionsError}</div> : null}
-          {selectedExplorerPitcher() ? (
-            <div className="inline-note">
-              Cached range: {selectedExplorerPitcher()?.first_game_date} to{" "}
-              {selectedExplorerPitcher()?.last_game_date}
-            </div>
-          ) : resolvableExplorerPitcher() ? (
-            <div className="inline-note pitcher-first-note">
-              Press Search or leave the field to use {resolvableExplorerPitcher()?.player_name}.
-            </div>
-          ) : (
-            <div className="inline-note pitcher-first-note">
-              Choose a cached pitcher to unlock seasons, games, dates, pitch types, counts,
-              locations, and outcomes.
-            </div>
-          )}
-          {filterGroups.map((group) => (
-            <section className="filter-group" key={group.title}>
-              <h3>{group.title}</h3>
-              <div className="filter-grid">
-                {group.fields.map((field) => renderPitchFilterField(field))}
-              </div>
-            </section>
-          ))}
-          {activePitchFilters().length > 0 ? (
-            <div className="active-filter-bar">
-              <span>Active Filters</span>
-              {activePitchFilters().map((filter) => (
-                <button
-                  className="filter-chip"
-                  key={filter.name}
-                  type="button"
-                  onClick={() => removePitchFilter(filter.name)}
-                >
-                  {filter.label}: {filter.value} x
-                </button>
-              ))}
-            </div>
-          ) : null}
-          <div className="form-actions">
-            <button
-              className="search-button"
-              disabled={isSearching || !resolvableExplorerPitcher()}
-              type="submit"
-            >
-              {isSearching
-                ? "Searching..."
-                : resolvableExplorerPitcher()
-                  ? "Search"
-                  : "Choose Pitcher"}
-            </button>
-            <button className="secondary-button" onClick={clearPitchFilters} type="button">
-              Clear Filters
-            </button>
-          </div>
-        </form>
-
-        {searchError ? <div className="error-banner">{searchError}</div> : null}
-
-        <div className="results-header">
-          <h3>Results</h3>
-          <span>
-            {totalResultCount > resultCount
-              ? `Showing ${resultCount} of ${totalResultCount} pitches`
-              : `${resultCount} pitches`}
-          </span>
-        </div>
-        {results.length > 0 ? (
-          <button
-            className="secondary-button"
-            onClick={() =>
-              downloadCsv(
-                "relay-pitches.csv",
-                results.map((pitch) => ({
-                  game_date: formatDate(pitch.game_date),
-                  player_name: pitch.player_name,
-                  batter: formatBatter(pitch),
-                  batter_hand: pitch.stand,
-                  pitch_type: pitch.pitch_type,
-                  release_speed: pitch.release_speed,
-                  release_spin_rate: pitch.release_spin_rate,
-                  p_throws: pitch.p_throws,
-                  release_pos_x: pitch.release_pos_x,
-                  release_pos_z: pitch.release_pos_z,
-                  ivb_inches: pitch.pfx_z === null ? null : pitch.pfx_z * 12,
-                  hb_inches: pitch.pfx_x === null ? null : pitch.pfx_x * 12,
-                  plate_location: describePlateLocation(pitch),
-                  plate_x: pitch.plate_x,
-                  plate_z: pitch.plate_z,
-                  batted_ball_type: formatBattedBall(pitch.bb_type),
-                  exit_velocity: pitch.launch_speed,
-                  launch_angle: pitch.launch_angle,
-                  estimated_distance: pitch.hit_distance_sc,
-                  expected_ba: pitch.estimated_ba_using_speedangle,
-                  expected_woba: pitch.estimated_woba_using_speedangle,
-                  woba_value: pitch.woba_value,
-                  balls: pitch.balls,
-                  strikes: pitch.strikes,
-                  description: pitch.description,
-                  events: pitch.events,
-                })),
-              )
-            }
-            type="button"
-          >
-            Export Results CSV
-          </button>
-        ) : null}
-
-        {arsenalSummary.length > 0 ? (
-          <section className="chart-panel">
-            <div className="chart-heading">
-              <h3>Arsenal Summary</h3>
-              <span>Current result set</span>
-            </div>
-            <div className="table-wrap compact-table-wrap">
-              <table className="mini-table">
-                <thead>
-                  <tr>
-                    <th>Pitch</th>
-                    <th>Count</th>
-                    <th>Usage</th>
-                    <th>Velo</th>
-                    <th>Spin</th>
-                    <th>IVB</th>
-                    <th>HB</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {arsenalSummary.map((pitch) => (
-                    <tr key={pitch.pitchType}>
-                      <td>{pitch.pitchType}</td>
-                      <td>{pitch.count}</td>
-                      <td>{formatRate(pitch.count / results.length)}</td>
-                      <td>{formatNumber(avg(pitch.velocity))}</td>
-                      <td>{formatNumber(avg(pitch.spin), 0)}</td>
-                      <td>{formatNumber(avg(pitch.ivb))}</td>
-                      <td>{formatNumber(avg(pitch.hb))}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        ) : null}
-        <PitchHeatmap
-          heatmap={heatmap}
-          mode={heatmapMode}
-          isLoading={isHeatmapLoading}
-          onModeChange={updateHeatmapMode}
-        />
-        <StrikeZoneChart pitches={results} />
-        <MovementChart pitches={results} />
-
-        <div className="table-wrap">
-          {results.length > 0 ? (
-            <table>
-              <thead>
-                <tr>
-                  {renderSortableHeader("game_date", "Date")}
-                  {renderSortableHeader("player_name", "Pitcher")}
-                  {renderSortableHeader("batter_name", "Batter")}
-                  {renderSortableHeader("pitch_type", "Type")}
-                  {renderSortableHeader("release_speed", "Velocity")}
-                  {renderSortableHeader("release_spin_rate", "Spin")}
-                  {renderSortableHeader("pfx_z", "IVB")}
-                  {renderSortableHeader("pfx_x", "HB")}
-                  {renderSortableHeader("location", "Location")}
-                  {renderSortableHeader("bb_type", "Contact")}
-                  {renderSortableHeader("launch_speed", "Exit Velo")}
-                  {renderSortableHeader("launch_angle", "Launch Angle")}
-                  {renderSortableHeader("hit_distance_sc", "Distance")}
-                  {renderSortableHeader("estimated_ba_using_speedangle", "xBA")}
-                  {renderSortableHeader("estimated_woba_using_speedangle", "xwOBA")}
-                  {renderSortableHeader("count", "Count")}
-                  {renderSortableHeader("description", "Description")}
-                  {renderSortableHeader("events", "Events")}
-                </tr>
-              </thead>
-              <tbody>
-                {sortedResults.map((pitch, index) => (
-                  <tr
-                    key={`${pitch.game_date}-${pitch.pitcher}-${pitch.batter}-${index}`}
-                  >
-                    <td>{formatDate(pitch.game_date)}</td>
-                    <td>{formatValue(pitch.player_name)}</td>
-                    <td>{formatBatter(pitch)}</td>
-                    <td>{formatValue(pitch.pitch_type)}</td>
-                    <td>{formatValue(pitch.release_speed)}</td>
-                    <td>{formatNumber(pitch.release_spin_rate, 0)}</td>
-                    <td>{formatBreak(pitch.pfx_z)}</td>
-                    <td>{formatBreak(pitch.pfx_x)}</td>
-                    <td>{describePlateLocation(pitch)}</td>
-                    <td>{formatBattedBall(pitch.bb_type)}</td>
-                    <td>{formatNumber(pitch.launch_speed)}</td>
-                    <td>{formatNumber(pitch.launch_angle, 0)}</td>
-                    <td>{formatNumber(pitch.hit_distance_sc, 0)}</td>
-                    <td>{formatNumber(pitch.estimated_ba_using_speedangle, 3)}</td>
-                    <td>{formatNumber(pitch.estimated_woba_using_speedangle, 3)}</td>
-                    <td>
-                      {pitch.balls ?? ""}
-                      {pitch.balls !== null || pitch.strikes !== null ? "-" : ""}
-                      {pitch.strikes ?? ""}
-                    </td>
-                    <td>{formatDescription(pitch.description)}</td>
-                    <td>{formatEvent(pitch.events)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <div className="empty-state">
-              <p>
-                {isSearching
-                  ? "Loading pitches..."
-                  : selectedExplorerPitcher()
-                    ? "Run a search to see cached Statcast pitches."
-                    : "Choose a pitcher to begin exploring cached Statcast pitches."}
-              </p>
-            </div>
-          )}
-        </div>
-      </section>
-      ) : (
-        <section className="page-section" aria-labelledby="compare-title">
-          <div className="section-heading">
-            <h2 id="compare-title">Pitcher Compare</h2>
-            <span>{API_URL}</span>
-          </div>
-
-          <form className="filter-panel" onSubmit={handleCompare}>
-            {pitcherError ? <div className="inline-note">{pitcherError}</div> : null}
-            {compareDateRange ? (
-              <div className="inline-note">
-                Cached range: {compareDateRange.first_game_date} to{" "}
-                {compareDateRange.last_game_date}
-              </div>
-            ) : (
-              <div className="inline-note pitcher-first-note">
-                Choose a cached pitcher to unlock period presets and date ranges.
-              </div>
-            )}
-            <section className="filter-group">
-              <h3>Pitcher</h3>
-              <div className="filter-grid compare-filter-grid">
-                <label className="filter-field">
-                  <span>Pitcher</span>
-                  <input
-                    list="cached-pitchers"
-                    name="pitcher_name"
-                    type="text"
-                    value={compareFilters.pitcher_name}
-                    onBlur={() => {
-                      setCompareFilters((currentFilters) =>
-                        completePitcherName(currentFilters),
-                      );
-                    }}
-                    onChange={(event) =>
-                      updateCompareFilter("pitcher_name", event.target.value)
-                    }
-                  />
-                </label>
-              </div>
-            </section>
-            <section className="filter-group">
-              <h3>Periods</h3>
-              <div className="filter-grid compare-filter-grid">
-                {compareFields.map((field) => (
-                <label className="filter-field" key={field.name}>
-                  <span>{field.label}</span>
-                  <input
-                    disabled={!compareDateRange}
-                    name={field.name}
-                    type={field.type}
-                    min={field.type === "date" ? compareDateRange?.first_game_date : undefined}
-                    max={field.type === "date" ? compareDateRange?.last_game_date : undefined}
-                    value={compareFilters[field.name]}
-                    onChange={(event) =>
-                      updateCompareFilter(field.name, event.target.value)
-                    }
-                    required={field.required}
-                  />
-                </label>
-              ))}
-              </div>
-            </section>
-            {activeCompareFilters().length > 0 ? (
-              <div className="active-filter-bar">
-                <span>Comparison Inputs</span>
-                {activeCompareFilters().map((filter) => (
-                  <button
-                    className="filter-chip"
-                    key={filter.name}
-                    type="button"
-                    onClick={() => removeCompareFilter(filter.name)}
-                  >
-                    {filter.label}: {filter.value} x
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            <div className="preset-row">
-              <button
-                disabled={!hasComparePresetRange("first_second", compareDateRange)}
-                type="button"
-                onClick={() => setComparePreset("first_second")}
-              >
-                First Half vs Second Half
-              </button>
-              <button
-                disabled={!hasComparePresetRange("last30_previous30", compareDateRange)}
-                type="button"
-                onClick={() => setComparePreset("last30_previous30")}
-              >
-                Previous 30 vs Last 30
-              </button>
-              <button
-                disabled={!hasComparePresetRange("month_month", compareDateRange)}
-                type="button"
-                onClick={() => setComparePreset("month_month")}
-              >
-                First Month vs Second Month
-              </button>
-            </div>
-            <div className="form-actions">
-              <button
-                className="search-button"
-                disabled={isComparing || !canCompare}
-                type="submit"
-              >
-                {isComparing ? "Comparing..." : canCompare ? "Compare" : "Choose Periods"}
-              </button>
-              <button className="secondary-button" onClick={clearCompareFilters} type="button">
-                Clear Compare
-              </button>
-            </div>
-          </form>
-
-          {compareError ? <div className="error-banner">{compareError}</div> : null}
-
-          {comparison ? (
-            <>
-              <div className="compare-result-header">
-                <div>
-                  <h3>
-                    {formatShortDate(comparison.period_a.start)} -{" "}
-                    {formatShortDate(comparison.period_a.end)} vs{" "}
-                    {formatShortDate(comparison.period_b.start)} -{" "}
-                    {formatShortDate(comparison.period_b.end)}
-                  </h3>
-                  <p>
-                    Period B minus Period A for {searchFiltersPitcherName(compareFilters)}
-                  </p>
-                </div>
-                <div className="save-row">
-                  <input
-                    placeholder="Name this comparison"
-                    value={comparisonName}
-                    onChange={(event) => setComparisonName(event.target.value)}
-                  />
-                  <button className="secondary-button" onClick={saveCurrentComparison} type="button">
-                    Save
-                  </button>
-                  <button
-                    className="secondary-button"
-                    onClick={() =>
-                      downloadCsv(
-                        "relay-comparison.csv",
-                        visiblePitchTypes.map((pitchType) => ({
-                          pitch_type: pitchType,
-                          a_usage: comparison.period_a.metrics.pitch_usage[pitchType]?.rate,
-                          b_usage: comparison.period_b.metrics.pitch_usage[pitchType]?.rate,
-                          usage_delta: comparison.deltas.pitch_usage[pitchType]?.rate,
-                          velocity_delta: comparison.deltas.average_velocity[pitchType],
-                          spin_delta: comparison.deltas.average_spin_rate[pitchType],
-                          ivb_delta: comparison.deltas.average_induced_vertical_break[pitchType],
-                          hb_delta: comparison.deltas.average_horizontal_break[pitchType],
-                        })),
-                      )
-                    }
-                    type="button"
-                  >
-                    Export CSV
-                  </button>
-                </div>
-              </div>
-              {savedComparisons.length > 0 ? (
-                <div className="saved-row">
-                  <span>Saved</span>
-                  {savedComparisons.map((saved) => (
-                    <button
-                      key={saved.id}
-                      onClick={() => setCompareFilters(saved.filters)}
-                      type="button"
-                    >
-                      {saved.name}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-              <div className="pitch-type-toggles">
-                <span>Pitch Types</span>
-                {pitchTypes.map((pitchType) => (
-                  <label key={pitchType}>
-                    <input
-                      checked={comparePitchTypes.includes(pitchType)}
-                      onChange={(event) => {
-                        setComparePitchTypes((current) =>
-                          event.target.checked
-                            ? [...current, pitchType]
-                            : current.filter((value) => value !== pitchType),
-                        );
-                      }}
-                      type="checkbox"
-                    />
-                    {pitchType}
-                  </label>
-                ))}
-              </div>
-              <div className="comparison-summary">
-                <div className="metric-card">
-                  <span>Usage Delta</span>
-                  <strong>{topUsageDelta}</strong>
-                </div>
-                <div className="metric-card">
-                  <span>Pitch-Type Velo Delta</span>
-                  <strong>{topVelocityDelta}</strong>
-                </div>
-                <div className="metric-card">
-                  <span>Pitch-Type Spin Delta</span>
-                  <strong>{topSpinDelta}</strong>
-                </div>
-                <div className="metric-card">
-                  <span>Pitch Count</span>
-                  <strong>{formatDelta(comparison.deltas.pitch_count, "number")}</strong>
-                </div>
-                <div className="metric-card">
-                  <span>Strike Rate</span>
-                  <strong>{formatDelta(comparison.deltas.strike_rate, "rate")}</strong>
-                </div>
-                <div className="metric-card">
-                  <span>Whiff Rate</span>
-                  <strong>{formatDelta(comparison.deltas.whiff_rate, "rate")}</strong>
-                </div>
-                <div className="metric-card">
-                  <span>Zone Rate</span>
-                  <strong>{formatDelta(comparison.deltas.zone_rate, "rate")}</strong>
-                </div>
-              </div>
-
-              <div className="comparison-panels">
-                <section className="comparison-panel">
-                  <h3>Period A</h3>
-                  <p>
-                    {comparison.period_a.start} to {comparison.period_a.end}
-                  </p>
-                  <div className="summary-row">
-                    <span>Pitches</span>
-                    <strong>{comparison.period_a.metrics.pitch_count}</strong>
-                  </div>
-                  <div className="summary-row">
-                    <span>Strike Rate</span>
-                    <strong>{formatRate(comparison.period_a.metrics.strike_rate)}</strong>
-                  </div>
-                  <div className="summary-row">
-                    <span>Whiff Rate</span>
-                    <strong>{formatRate(comparison.period_a.metrics.whiff_rate)}</strong>
-                  </div>
-                  <div className="summary-row">
-                    <span>Zone Rate</span>
-                    <strong>{formatRate(comparison.period_a.metrics.zone_rate)}</strong>
-                  </div>
-                  <table className="mini-table">
-                    <thead>
-                      <tr>
-                        <th>Pitch</th>
-                        <th>Usage</th>
-                        <th>Velo</th>
-                        <th>Spin</th>
-                        <th>IVB</th>
-                        <th>HB</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visiblePitchTypes.map((pitchType) => (
-                        <tr key={pitchType}>
-                          <td>{pitchType}</td>
-                          <td>
-                            {formatRate(
-                              comparison.period_a.metrics.pitch_usage[pitchType]
-                                ?.rate,
-                            )}
-                          </td>
-                          <td>
-                            {formatNumber(
-                              comparison.period_a.metrics.average_velocity[
-                                pitchType
-                              ],
-                            )}
-                          </td>
-                          <td>
-                            {formatNumber(
-                              comparison.period_a.metrics.average_spin_rate[
-                                pitchType
-                              ],
-                              0,
-                            )}
-                          </td>
-                          <td>
-                            {formatNumber(
-                              comparison.period_a.metrics
-                                .average_induced_vertical_break[pitchType],
-                            )}
-                          </td>
-                          <td>
-                            {formatNumber(
-                              comparison.period_a.metrics.average_horizontal_break[
-                                pitchType
-                              ],
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </section>
-
-                <section className="comparison-panel">
-                  <h3>Period B</h3>
-                  <p>
-                    {comparison.period_b.start} to {comparison.period_b.end}
-                  </p>
-                  <div className="summary-row">
-                    <span>Pitches</span>
-                    <strong>{comparison.period_b.metrics.pitch_count}</strong>
-                  </div>
-                  <div className="summary-row">
-                    <span>Strike Rate</span>
-                    <strong>{formatRate(comparison.period_b.metrics.strike_rate)}</strong>
-                  </div>
-                  <div className="summary-row">
-                    <span>Whiff Rate</span>
-                    <strong>{formatRate(comparison.period_b.metrics.whiff_rate)}</strong>
-                  </div>
-                  <div className="summary-row">
-                    <span>Zone Rate</span>
-                    <strong>{formatRate(comparison.period_b.metrics.zone_rate)}</strong>
-                  </div>
-                  <table className="mini-table">
-                    <thead>
-                      <tr>
-                        <th>Pitch</th>
-                        <th>Usage</th>
-                        <th>Velo</th>
-                        <th>Spin</th>
-                        <th>IVB</th>
-                        <th>HB</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visiblePitchTypes.map((pitchType) => (
-                        <tr key={pitchType}>
-                          <td>{pitchType}</td>
-                          <td>
-                            {formatRate(
-                              comparison.period_b.metrics.pitch_usage[pitchType]
-                                ?.rate,
-                            )}
-                          </td>
-                          <td>
-                            {formatNumber(
-                              comparison.period_b.metrics.average_velocity[
-                                pitchType
-                              ],
-                            )}
-                          </td>
-                          <td>
-                            {formatNumber(
-                              comparison.period_b.metrics.average_spin_rate[
-                                pitchType
-                              ],
-                              0,
-                            )}
-                          </td>
-                          <td>
-                            {formatNumber(
-                              comparison.period_b.metrics
-                                .average_induced_vertical_break[pitchType],
-                            )}
-                          </td>
-                          <td>
-                            {formatNumber(
-                              comparison.period_b.metrics.average_horizontal_break[
-                                pitchType
-                              ],
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </section>
-              </div>
-
-              <div className="results-header">
-                <h3>Pitch-Type Diff</h3>
-                <span>Period B minus Period A</span>
-              </div>
-              <div className="table-wrap">
-                <table className="comparison-table">
-                  <thead>
-                    <tr>
-                      <th>Pitch</th>
-                      <th>A Usage</th>
-                      <th>B Usage</th>
-                      <th>Usage Delta</th>
-                      <th>A Velo</th>
-                      <th>B Velo</th>
-                      <th>Velo Delta</th>
-                      <th>Spin Delta</th>
-                      <th>IVB Delta</th>
-                      <th>HB Delta</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visiblePitchTypes.map((pitchType) => (
-                      <tr key={pitchType}>
-                        <td>{pitchType}</td>
-                        <td>
-                          {formatRate(
-                            comparison.period_a.metrics.pitch_usage[pitchType]
-                              ?.rate,
-                          )}
-                        </td>
-                        <td>
-                          {formatRate(
-                            comparison.period_b.metrics.pitch_usage[pitchType]
-                              ?.rate,
-                          )}
-                        </td>
-                        <td>
-                          {formatDelta(
-                            comparison.deltas.pitch_usage[pitchType]?.rate,
-                            "rate",
-                          )}
-                        </td>
-                        <td>
-                          {formatNumber(
-                            comparison.period_a.metrics.average_velocity[
-                              pitchType
-                            ],
-                          )}
-                        </td>
-                        <td>
-                          {formatNumber(
-                            comparison.period_b.metrics.average_velocity[
-                              pitchType
-                            ],
-                          )}
-                        </td>
-                        <td>
-                          {formatDelta(
-                            comparison.deltas.average_velocity[pitchType],
-                            "number",
-                          )}
-                        </td>
-                        <td>
-                          {formatDelta(
-                            comparison.deltas.average_spin_rate[pitchType],
-                            "number",
-                          )}
-                        </td>
-                        <td>
-                          {formatDelta(
-                            comparison.deltas.average_induced_vertical_break[
-                              pitchType
-                            ],
-                            "number",
-                          )}
-                        </td>
-                        <td>
-                          {formatDelta(
-                            comparison.deltas.average_horizontal_break[pitchType],
-                            "number",
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          ) : (
-            <div className="empty-state bordered-empty">
-              <p>
-                {isComparing
-                  ? "Loading comparison..."
-                  : "Choose two date ranges to compare a pitcher's profile."}
-              </p>
-            </div>
-          )}
-        </section>
-      )}
+      <CompareView
+        hidden={activeView !== "compare"}
+        context={{
+          API_URL,
+          handleCompare,
+          pitcherError,
+          compareDateRange,
+          formatDate,
+          compareFilters,
+          completePitcherName,
+          updateCompareFilter,
+          compareOptions,
+          hasComparePresetRange,
+          setComparePreset,
+          compareFields,
+          formatShortDate,
+          formatShortDateRange,
+          activeCompareFilterList,
+          removeCompareFilter,
+          isComparing,
+          canCompare,
+          clearCompareFilters,
+          compareError,
+          comparison,
+          searchFiltersPitcherName,
+          comparisonName,
+          setComparisonName,
+          saveCurrentComparison,
+          downloadCsv,
+          visiblePitchTypes,
+          savedComparisons,
+          setCompareFilters,
+          setComparePitchTypes,
+          pitchTypes,
+          comparePitchTypes,
+          topUsageDelta,
+          topVelocityDelta,
+          topSpinDelta,
+          formatDelta,
+          compareHeatmapA,
+          compareHeatmapB,
+          compareHeatmapMode,
+          isCompareHeatmapLoading,
+          updateCompareHeatmapMode,
+          formatDateRange,
+          formatRate,
+          formatNumber,
+          drilldownPitchType,
+          loadPitchTypeDrilldown,
+          isDrilldownLoading,
+          drilldownA,
+          drilldownB,
+          setDrilldownPitchType,
+          setDrilldownA,
+          setDrilldownB,
+          whiffRateFromPitches,
+          zoneRateFromPitches,
+          rateDelta,
+          formatBatter,
+          formatDescription,
+          formatEvent
+        }}
+      />
     </main>
   );
 }

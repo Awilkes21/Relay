@@ -56,8 +56,25 @@ python scripts/ingest_statcast_batch.py \
   --end-date 2024-09-30 \
   --pitcher-name "Aaron Nola" \
   --pitcher-name "Tarik Skubal" \
-  --output ../data/statcast.parquet
+  --output ../data/statcast.parquet \
+  --manifest ../data/statcast_manifest.json
 ```
+
+The batch script writes one shared parquet cache plus a local manifest with the
+date range, per-pitcher row counts, pitch types, and cache index. Rebuild the
+manifest from an existing cache without fetching new data:
+
+```bash
+python scripts/ingest_statcast_batch.py \
+  --start-date 2024-04-01 \
+  --end-date 2024-09-30 \
+  --output ../data/statcast.parquet \
+  --manifest ../data/statcast_manifest.json \
+  --index-only
+```
+
+Use `--replace` to rebuild the cache from scratch, or omit it to append and
+dedupe against the existing parquet.
 
 Set `RELAY_CORS_ORIGINS` to configure local frontend origins if needed:
 

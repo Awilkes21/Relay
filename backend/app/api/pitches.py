@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.errors import raise_service_error
 from app.services.pitch_query_service import (
+    get_cache_metadata,
     get_pitch_heatmap,
     list_cached_pitchers,
     list_pitch_filter_options,
@@ -34,6 +35,7 @@ PITCH_FIELDS = [
     "release_spin_rate",
     "release_pos_x",
     "release_pos_z",
+    "arm_angle",
     "pfx_x",
     "pfx_z",
     "plate_x",
@@ -139,6 +141,14 @@ def get_pitchers() -> dict[str, Any]:
         raise_service_error(exc)
 
     return {"count": len(pitchers), "results": pitchers}
+
+
+@router.get("/cache/metadata")
+def get_cache_metadata_endpoint() -> dict[str, Any]:
+    try:
+        return get_cache_metadata()
+    except Exception as exc:
+        raise_service_error(exc)
 
 
 @router.get("/pitch-options")

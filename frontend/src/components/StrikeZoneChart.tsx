@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PitchResult } from "../api";
+import { formatPitchType } from "../pitchTypes";
 
 type StrikeZoneChartProps = {
   pitches: PitchResult[];
@@ -64,7 +65,7 @@ function formatTooltip(pitch: PitchResult) {
       : `Count: ${pitch.balls ?? ""}-${pitch.strikes ?? ""}`;
 
   return [
-    `Pitch: ${pitch.pitch_type ?? ""}`,
+    `Pitch: ${formatPitchType(pitch.pitch_type)}`,
     `Velocity: ${formatDetail(pitch.release_speed)}`,
     `Spin: ${formatSpin(pitch.release_spin_rate)}`,
     `Induced vertical break: ${formatBreak(pitch.pfx_z)}`,
@@ -145,6 +146,17 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
     setSelectedPitch(null);
   }, [pitches]);
 
+  useEffect(() => {
+    function clearSelection(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setSelectedPitch(null);
+      }
+    }
+
+    window.addEventListener("keydown", clearSelection);
+    return () => window.removeEventListener("keydown", clearSelection);
+  }, []);
+
   return (
     <section
       className={isExpanded ? "chart-panel chart-panel--expanded" : "chart-panel"}
@@ -164,7 +176,7 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
                   className="legend-swatch"
                   style={{ backgroundColor: pitchColor(pitchType) }}
                 />
-                {pitchType}
+                {formatPitchType(pitchType)}
               </span>
             ))
           ) : (
@@ -253,10 +265,12 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
                 cy={scaleZ(pitch.plate_z, domain)}
                 fill={pitchColor(pitch.pitch_type)}
                 key={`${pitch.plate_x}-${pitch.plate_z}-${index}`}
-                onClick={() => setSelectedPitch(pitch)}
+                onClick={() =>
+                  setSelectedPitch((current) => (current === pitch ? null : pitch))
+                }
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
-                    setSelectedPitch(pitch);
+                    setSelectedPitch((current) => (current === pitch ? null : pitch));
                   }
                 }}
                 r="5"
@@ -274,10 +288,14 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
       </div>
 
       {selectedPitch ? (
-        <div className="pitch-detail-panel">
+        <div className="pitch-detail-panel selection-panel">
+          <div className="selection-panel-header">
+            <span>Selected Pitch</span>
+            <strong>{formatPitchType(selectedPitch.pitch_type)}</strong>
+          </div>
           <div>
             <span>Pitch</span>
-            <strong>{formatDetail(selectedPitch.pitch_type)}</strong>
+            <strong>{formatPitchType(selectedPitch.pitch_type)}</strong>
           </div>
           <div>
             <span>Velocity</span>
@@ -322,11 +340,11 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
             <strong>Pitcher view</strong>
           </div>
           <button
-            className="detail-close-button"
+            className="detail-close-button clear-selection-button"
             onClick={() => setSelectedPitch(null)}
             type="button"
           >
-            Clear
+            Clear Selection
           </button>
         </div>
       ) : null}

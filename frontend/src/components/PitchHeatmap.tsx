@@ -1,11 +1,15 @@
-import { useEffect, useState, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
 import type { HeatmapMode, PitchHeatmapResponse } from "../api";
+import { formatPitchType } from "../pitchTypes";
 
 type PitchHeatmapProps = {
   heatmap: PitchHeatmapResponse | null;
   mode: HeatmapMode;
   isLoading: boolean;
   onModeChange: (mode: HeatmapMode) => void;
+  pitcherHand?: string | null;
+  subtitle?: string;
+  title?: string;
 };
 
 type SelectionCircle = {
@@ -17,6 +21,10 @@ type SelectionCircle = {
 type BrushInteraction =
   | {
       type: "draw";
+      pointerId: number;
+    }
+  | {
+      type: "resize";
       pointerId: number;
     }
   | {
@@ -41,6 +49,7 @@ const zoneRight = 0.83;
 const zoneTop = 3.5;
 const zoneBottom = 1.5;
 const zoneMiddle = (zoneTop + zoneBottom) / 2;
+const resizeHitWidth = 9;
 
 function scaleX(value: number, heatmap: PitchHeatmapResponse) {
   const { x_min: xMin, x_max: xMax } = heatmap.domain;
@@ -56,6 +65,18 @@ function pitcherViewX(value: number) {
   return value * -1;
 }
 
+function horizontalSideLabels(pitcherHand?: string | null) {
+  if (pitcherHand === "L") {
+    return { left: "Arm Side", right: "Glove Side" };
+  }
+
+  if (pitcherHand === "R") {
+    return { left: "Glove Side", right: "Arm Side" };
+  }
+
+  return { left: "Glove Side", right: "Arm Side" };
+}
+
 function interpolateColor(
   start: [number, number, number],
   end: [number, number, number],
@@ -66,36 +87,37 @@ function interpolateColor(
   ) as [number, number, number];
 }
 
-function heatColor(density: number) {
-  const easedDensity = Math.sqrt(Math.max(0, Math.min(density, 1)));
-  const low: [number, number, number] = [222, 179, 151];
-  const mid: [number, number, number] = [194, 103, 76];
-  const high: [number, number, number] = [142, 43, 36];
-  const color =
-    easedDensity < 0.5
-      ? interpolateColor(low, mid, easedDensity * 2)
-      : interpolateColor(mid, high, (easedDensity - 0.5) * 2);
-  const alpha = 0.18 + easedDensity * 0.72;
-  return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha.toFixed(2)})`;
+function heatRgb(density: number) {
+  const easedDensity = Math.pow(Math.max(0, Math.min(density, 1)), 0.72);
+  const low: [number, number, number] = [126, 156, 201];
+  const mid: [number, number, number] = [239, 226, 222];
+  const high: [number, number, number] = [190, 48, 54];
+
+  return easedDensity < 0.5
+    ? interpolateColor(low, mid, easedDensity * 2)
+    : interpolateColor(mid, high, (easedDensity - 0.5) * 2);
 }
 
-function cellGeometry(cell: { x_start: number; x_end: number; z_start: number; z_end: number }, heatmap: PitchHeatmapResponse) {
+function cellGeometry(
+  cell: { x_start: number; x_end: number; z_start: number; z_end: number },
+  heatmap: PitchHeatmapResponse,
+) {
   const xStart = scaleX(pitcherViewX(cell.x_end), heatmap);
   const xEnd = scaleX(pitcherViewX(cell.x_start), heatmap);
   const yTop = scaleZ(cell.z_end, heatmap);
   const yBottom = scaleZ(cell.z_start, heatmap);
-  const width = Math.max(xEnd - xStart, 0);
-  const height = Math.max(yBottom - yTop, 0);
+  const cellWidth = Math.max(xEnd - xStart, 0);
+  const cellHeight = Math.max(yBottom - yTop, 0);
 
   return {
     xStart,
     xEnd,
     yTop,
     yBottom,
-    width,
-    height,
-    centerX: xStart + width / 2,
-    centerY: yTop + height / 2,
+    width: cellWidth,
+    height: cellHeight,
+    centerX: xStart + cellWidth / 2,
+    centerY: yTop + cellHeight / 2,
   };
 }
 
@@ -107,45 +129,113 @@ function formatRate(value: number | null | undefined) {
   return value === null || value === undefined ? "-" : `${(value * 100).toFixed(1)}%`;
 }
 
-function isCellInZone(cell: PitchHeatmapResponse["cells"][number]) {
-  const xCenter = (cell.x_start + cell.x_end) / 2;
-  const zCenter = (cell.z_start + cell.z_end) / 2;
-  return xCenter >= zoneLeft && xCenter <= zoneRight && zCenter >= zoneBottom && zCenter <= zoneTop;
-}
-
-function describeCellLocation(cell: PitchHeatmapResponse["cells"][number]) {
-  const pitcherViewCenterX = pitcherViewX((cell.x_start + cell.x_end) / 2);
-  const zCenter = (cell.z_start + cell.z_end) / 2;
-  const vertical = zCenter > zoneTop ? "Above Zone" : zCenter < zoneBottom ? "Below Zone" : zCenter >= zoneMiddle ? "High" : "Low";
-  const horizontal =
-    Math.abs(pitcherViewCenterX) < 0.3
-      ? "Center"
-      : pitcherViewCenterX < 0
-        ? "Pitcher Left"
-        : "Pitcher Right";
-
-  if (vertical === "Above Zone" || vertical === "Below Zone") {
-    return horizontal === "Center" ? vertical : `${vertical}, ${horizontal}`;
-  }
-  return `${vertical} ${horizontal}`;
-}
-
-function cellTooltip(cell: PitchHeatmapResponse["cells"][number], modeLabel: string) {
-  return [
-    `${cell.count} pitches`,
-    `${formatRate(cell.share)} of filtered pitches`,
-    `${describeCellLocation(cell)} | ${isCellInZone(cell) ? "In Zone" : "Out of Zone"}`,
-    `Mode: ${modeLabel}`,
-    `Hotness: ${formatRate(cell.density)} of max cell`,
-    `Average velocity: ${formatNumber(cell.average_velocity)} mph`,
-    `Top pitch: ${cell.top_pitch_type ?? "-"} (${formatRate(cell.top_pitch_share)})`,
-    `Average exit velocity: ${formatNumber(cell.average_exit_velocity)} mph`,
-    `Max exit velocity: ${formatNumber(cell.max_exit_velocity)} mph`,
-  ].join("\n");
-}
-
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function drawHeatmapCanvas(
+  canvas: HTMLCanvasElement,
+  heatmap: PitchHeatmapResponse,
+  mode: HeatmapMode,
+) {
+  const context = canvas.getContext("2d");
+  if (!context) return;
+
+  const pixelRatio = window.devicePixelRatio || 1;
+  const plotWidth = width - padding * 2;
+  const plotHeight = height - padding * 2;
+  canvas.width = width * pixelRatio;
+  canvas.height = height * pixelRatio;
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.clearRect(0, 0, width, height);
+
+  const background = context.createLinearGradient(0, padding, 0, height - padding);
+  background.addColorStop(0, "#fbfcfd");
+  background.addColorStop(1, "#f0f4f7");
+  context.fillStyle = background;
+  context.fillRect(padding, padding, plotWidth, plotHeight);
+  context.strokeStyle = "#d9dee7";
+  context.lineWidth = 1;
+  context.strokeRect(padding, padding, plotWidth, plotHeight);
+
+  if (heatmap.cells.length === 0) return;
+
+  const sampleWidth = 260;
+  const sampleHeight = 210;
+  const field = new Float32Array(sampleWidth * sampleHeight);
+  const binWidth = plotWidth / heatmap.x_bins;
+  const binHeight = plotHeight / heatmap.z_bins;
+  const baseSigma = Math.max(binWidth, binHeight);
+  const sigma = baseSigma * (mode === "hard_contact" || mode === "whiffs" ? 1.25 : 1.45);
+  const influenceRadius = sigma * 2.8;
+  const points = heatmap.cells.map((cell) => {
+    const geometry = cellGeometry(cell, heatmap);
+    return { x: geometry.centerX, y: geometry.centerY, weight: cell.count };
+  });
+  let maxValue = 0;
+
+  for (let y = 0; y < sampleHeight; y += 1) {
+    const canvasY = padding + (y / (sampleHeight - 1)) * plotHeight;
+    for (let x = 0; x < sampleWidth; x += 1) {
+      const canvasX = padding + (x / (sampleWidth - 1)) * plotWidth;
+      let value = 0;
+
+      for (const point of points) {
+        const dx = canvasX - point.x;
+        const dy = canvasY - point.y;
+        if (Math.abs(dx) > influenceRadius || Math.abs(dy) > influenceRadius) continue;
+        value += point.weight * Math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
+      }
+
+      const index = y * sampleWidth + x;
+      field[index] = value;
+      maxValue = Math.max(maxValue, value);
+    }
+  }
+
+  if (maxValue <= 0) return;
+
+  const image = new ImageData(sampleWidth, sampleHeight);
+  for (let index = 0; index < field.length; index += 1) {
+    const normalized = field[index] / maxValue;
+    const cutoff = mode === "hard_contact" || mode === "whiffs" ? 0.09 : 0.065;
+    const visibleValue = normalized <= cutoff ? 0 : (normalized - cutoff) / (1 - cutoff);
+    const color = heatRgb(visibleValue);
+    const alpha =
+      visibleValue <= 0
+        ? 0
+        : Math.min(232, 18 + Math.pow(visibleValue, 0.92) * 210);
+    const imageIndex = index * 4;
+
+    image.data[imageIndex] = color[0];
+    image.data[imageIndex + 1] = color[1];
+    image.data[imageIndex + 2] = color[2];
+    image.data[imageIndex + 3] = alpha;
+  }
+
+  const fieldCanvas = document.createElement("canvas");
+  fieldCanvas.width = sampleWidth;
+  fieldCanvas.height = sampleHeight;
+  const fieldContext = fieldCanvas.getContext("2d");
+  if (!fieldContext) return;
+
+  fieldContext.putImageData(image, 0, 0);
+  context.save();
+  context.beginPath();
+  if (mode === "in_zone") {
+    context.rect(
+      scaleX(zoneLeft, heatmap),
+      scaleZ(zoneTop, heatmap),
+      scaleX(zoneRight, heatmap) - scaleX(zoneLeft, heatmap),
+      scaleZ(zoneBottom, heatmap) - scaleZ(zoneTop, heatmap),
+    );
+  } else {
+    context.rect(padding, padding, plotWidth, plotHeight);
+  }
+  context.clip();
+  context.imageSmoothingEnabled = true;
+  context.drawImage(fieldCanvas, padding, padding, plotWidth, plotHeight);
+  context.restore();
 }
 
 function cellInCircle(
@@ -246,32 +336,19 @@ function pointInsideCircle(point: { x: number; y: number }, circle: SelectionCir
   return Math.hypot(point.x - circle.cx, point.y - circle.cy) <= circle.r;
 }
 
-function PitchHeatmap({ heatmap, mode, isLoading, onModeChange }: PitchHeatmapProps) {
+function PitchHeatmap({
+  heatmap,
+  mode,
+  isLoading,
+  onModeChange,
+  pitcherHand,
+  subtitle,
+  title = "Pitch Heatmap",
+}: PitchHeatmapProps) {
   const cells = heatmap?.cells ?? [];
-  const cellByBin = new Map(cells.map((cell) => [`${cell.x_bin}-${cell.z_bin}`, cell]));
-  const gridCells = heatmap
-    ? Array.from({ length: heatmap.x_bins * heatmap.z_bins }, (_, index) => {
-        const xBin = index % heatmap.x_bins;
-        const zBin = Math.floor(index / heatmap.x_bins);
-        return {
-          x_bin: xBin,
-          z_bin: zBin,
-          x_start:
-            heatmap.domain.x_min +
-            (xBin / heatmap.x_bins) * (heatmap.domain.x_max - heatmap.domain.x_min),
-          x_end:
-            heatmap.domain.x_min +
-            ((xBin + 1) / heatmap.x_bins) * (heatmap.domain.x_max - heatmap.domain.x_min),
-          z_start:
-            heatmap.domain.z_min +
-            (zBin / heatmap.z_bins) * (heatmap.domain.z_max - heatmap.domain.z_min),
-          z_end:
-            heatmap.domain.z_min +
-            ((zBin + 1) / heatmap.z_bins) * (heatmap.domain.z_max - heatmap.domain.z_min),
-        };
-      })
-    : [];
   const modeLabel = heatmapModes.find((item) => item.value === mode)?.label ?? "All Pitches";
+  const sideLabels = horizontalSideLabels(pitcherHand);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [selectionCircle, setSelectionCircle] = useState<SelectionCircle | null>(null);
   const [draftCircle, setDraftCircle] = useState<SelectionCircle | null>(null);
   const [brushInteraction, setBrushInteraction] = useState<BrushInteraction | null>(null);
@@ -281,6 +358,7 @@ function PitchHeatmap({ heatmap, mode, isLoading, onModeChange }: PitchHeatmapPr
       ? cells.filter((cell) => cellInCircle(cell, heatmap, selectionCircle))
       : [];
   const selectedSummary = summarizeSelectedArea(selectedCells);
+  const hasSelectedPitches = selectedSummary.pitchCount > 0;
 
   useEffect(() => {
     setSelectionCircle(null);
@@ -288,8 +366,29 @@ function PitchHeatmap({ heatmap, mode, isLoading, onModeChange }: PitchHeatmapPr
     setBrushInteraction(null);
   }, [heatmap]);
 
-  function pointerPoint(event: PointerEvent<SVGRectElement>) {
-    const svg = event.currentTarget.ownerSVGElement;
+  useEffect(() => {
+    if (!canvasRef.current || !heatmap) return;
+    drawHeatmapCanvas(canvasRef.current, heatmap, mode);
+  }, [heatmap, mode]);
+
+  useEffect(() => {
+    function clearSelection(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setSelectionCircle(null);
+        setDraftCircle(null);
+        setBrushInteraction(null);
+      }
+    }
+
+    window.addEventListener("keydown", clearSelection);
+    return () => window.removeEventListener("keydown", clearSelection);
+  }, []);
+
+  function pointerPoint(event: PointerEvent<SVGElement>) {
+    const svg =
+      event.currentTarget instanceof SVGSVGElement
+        ? event.currentTarget
+        : event.currentTarget.ownerSVGElement;
     if (!svg) return null;
 
     const rect = svg.getBoundingClientRect();
@@ -299,19 +398,32 @@ function PitchHeatmap({ heatmap, mode, isLoading, onModeChange }: PitchHeatmapPr
     };
   }
 
-  function startSelection(event: PointerEvent<SVGRectElement>) {
+  function startSelection(event: PointerEvent<SVGElement>) {
     const point = pointerPoint(event);
     if (!point) return;
 
-    event.currentTarget.setPointerCapture(event.pointerId);
-    if (selectionCircle && pointInsideCircle(point, selectionCircle)) {
-      setBrushInteraction({
-        type: "move",
-        pointerId: event.pointerId,
-        offsetX: point.x - selectionCircle.cx,
-        offsetY: point.y - selectionCircle.cy,
-      });
-      return;
+    event.currentTarget.ownerSVGElement?.setPointerCapture(event.pointerId);
+    if (selectionCircle) {
+      const distanceFromCenter = Math.hypot(
+        point.x - selectionCircle.cx,
+        point.y - selectionCircle.cy,
+      );
+      const isOnBorder = Math.abs(distanceFromCenter - selectionCircle.r) <= resizeHitWidth;
+
+      if (isOnBorder) {
+        setBrushInteraction({ type: "resize", pointerId: event.pointerId });
+        return;
+      }
+
+      if (distanceFromCenter < selectionCircle.r) {
+        setBrushInteraction({
+          type: "move",
+          pointerId: event.pointerId,
+          offsetX: point.x - selectionCircle.cx,
+          offsetY: point.y - selectionCircle.cy,
+        });
+        return;
+      }
     }
 
     setBrushInteraction({ type: "draw", pointerId: event.pointerId });
@@ -319,7 +431,7 @@ function PitchHeatmap({ heatmap, mode, isLoading, onModeChange }: PitchHeatmapPr
     setDraftCircle({ cx: point.x, cy: point.y, r: 0 });
   }
 
-  function updateSelection(event: PointerEvent<SVGRectElement>) {
+  function updateSelection(event: PointerEvent<SVGElement>) {
     if (!brushInteraction) return;
     const point = pointerPoint(event);
     if (!point) return;
@@ -335,6 +447,19 @@ function PitchHeatmap({ heatmap, mode, isLoading, onModeChange }: PitchHeatmapPr
       return;
     }
 
+    if (brushInteraction.type === "resize" && selectionCircle && heatmap) {
+      setSelectionCircle(
+        constrainCircle({
+          ...selectionCircle,
+          r: Math.max(
+            Math.hypot(point.x - selectionCircle.cx, point.y - selectionCircle.cy),
+            minBrushRadius(heatmap),
+          ),
+        }),
+      );
+      return;
+    }
+
     if (brushInteraction.type === "draw" && draftCircle) {
       setDraftCircle(
         constrainCircle({
@@ -345,10 +470,12 @@ function PitchHeatmap({ heatmap, mode, isLoading, onModeChange }: PitchHeatmapPr
     }
   }
 
-  function finishSelection(event: PointerEvent<SVGRectElement>) {
+  function finishSelection(event: PointerEvent<SVGElement>) {
     if (!brushInteraction) return;
 
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
     if (brushInteraction.type === "draw" && draftCircle && heatmap) {
       setSelectionCircle(
         constrainCircle({ ...draftCircle, r: Math.max(draftCircle.r, minBrushRadius(heatmap)) }),
@@ -366,7 +493,10 @@ function PitchHeatmap({ heatmap, mode, isLoading, onModeChange }: PitchHeatmapPr
   return (
     <section className="chart-panel" aria-labelledby="heatmap-title">
       <div className="chart-heading">
-        <h3 id="heatmap-title">Pitch Heatmap</h3>
+        <div>
+          <h3 id="heatmap-title">{title}</h3>
+          {subtitle ? <p>{subtitle}</p> : null}
+        </div>
         <span>
           {isLoading
             ? "Loading..."
@@ -400,113 +530,93 @@ function PitchHeatmap({ heatmap, mode, isLoading, onModeChange }: PitchHeatmapPr
 
       <div className="strike-zone-frame">
         {heatmap ? (
-          <svg
-            aria-label="Pitch location heatmap"
-            className="strike-zone-chart heatmap-chart"
-            role="img"
-            viewBox={`0 0 ${width} ${height}`}
-          >
-            <defs>
-              <linearGradient id="heatmap-background-gradient" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor="#fbfcfd" />
-                <stop offset="100%" stopColor="#f0f4f7" />
-              </linearGradient>
-              <filter id="heatmap-soften">
-                <feGaussianBlur stdDeviation="1.4" />
-              </filter>
-            </defs>
-            <rect
-              className="heatmap-background"
-              x={padding}
-              y={padding}
-              width={width - padding * 2}
-              height={height - padding * 2}
+          <div className="heatmap-canvas-wrap">
+            <canvas
+              aria-hidden="true"
+              className="heatmap-canvas"
+              height={height}
+              ref={canvasRef}
+              width={width}
             />
-            <g className="heatmap-grid-layer" aria-hidden="true">
-              {gridCells.map((cell) => {
-                const geometry = cellGeometry(cell, heatmap);
-                const hasPitch = cellByBin.has(`${cell.x_bin}-${cell.z_bin}`);
-
-                return (
-                  <rect
-                    className={hasPitch ? "heatmap-grid-cell has-data" : "heatmap-grid-cell"}
-                    height={geometry.height}
-                    key={`${cell.x_bin}-${cell.z_bin}`}
-                    width={geometry.width}
-                    x={geometry.xStart}
-                    y={geometry.yTop}
-                  />
-                );
-              })}
-            </g>
-            <g className="heatmap-density-layer" filter="url(#heatmap-soften)" pointerEvents="none">
-              {cells.map((cell) => {
-                const geometry = cellGeometry(cell, heatmap);
-                const radiusScale = 1.05 + Math.sqrt(cell.density) * 0.5;
-
-                return (
-                  <ellipse
-                    fill={heatColor(cell.density)}
-                    cx={geometry.centerX}
-                    cy={geometry.centerY}
-                    key={`${cell.x_bin}-${cell.z_bin}`}
-                    opacity="0.88"
-                    rx={(geometry.width / 2) * radiusScale}
-                    ry={(geometry.height / 2) * radiusScale}
-                  />
-                );
-              })}
-            </g>
-            <rect
-              aria-label="Draw a circular heatmap selection"
-              className={
-                selectionCircle
-                  ? "heatmap-brush-target has-selection"
-                  : "heatmap-brush-target"
-              }
-              height={height - padding * 2}
+            <svg
+              aria-label="Pitch location heatmap"
+              className="heatmap-overlay"
               onPointerCancel={cancelSelection}
-              onPointerDown={startSelection}
               onPointerMove={updateSelection}
               onPointerUp={finishSelection}
-              width={width - padding * 2}
-              x={padding}
-              y={padding}
-            />
-            {activeCircle ? (
-              <circle
+              role="img"
+              viewBox={`0 0 ${width} ${height}`}
+            >
+              <rect
+                aria-label="Draw a circular heatmap selection"
                 className={
-                  draftCircle
-                    ? "heatmap-selection-circle is-drawing"
-                    : "heatmap-selection-circle"
+                  selectionCircle
+                    ? "heatmap-brush-target has-selection"
+                    : "heatmap-brush-target"
                 }
-                cx={activeCircle.cx}
-                cy={activeCircle.cy}
-                r={activeCircle.r}
+                height={height - padding * 2}
+                onPointerDown={startSelection}
+                width={width - padding * 2}
+                x={padding}
+                y={padding}
               />
-            ) : null}
-            <line
-              className="plot-axis"
-              x1={scaleX(0, heatmap)}
-              x2={scaleX(0, heatmap)}
-              y1={padding}
-              y2={height - padding}
-            />
-            <line
-              className="plot-axis"
-              x1={padding}
-              x2={width - padding}
-              y1={scaleZ(zoneMiddle, heatmap)}
-              y2={scaleZ(zoneMiddle, heatmap)}
-            />
-            <rect
-              className="strike-zone-box"
-              x={scaleX(zoneLeft, heatmap)}
-              y={scaleZ(zoneTop, heatmap)}
-              width={scaleX(zoneRight, heatmap) - scaleX(zoneLeft, heatmap)}
-              height={scaleZ(zoneBottom, heatmap) - scaleZ(zoneTop, heatmap)}
-            />
-          </svg>
+              {activeCircle ? (
+                <>
+                  <circle
+                    className={
+                      draftCircle
+                        ? "heatmap-selection-circle is-drawing"
+                        : "heatmap-selection-circle"
+                    }
+                    cx={activeCircle.cx}
+                    cy={activeCircle.cy}
+                    r={activeCircle.r}
+                  />
+                  {!draftCircle ? (
+                    <circle
+                      aria-label="Move or resize heatmap selection"
+                      className="heatmap-selection-hit-ring"
+                      cx={activeCircle.cx}
+                      cy={activeCircle.cy}
+                      onPointerDown={startSelection}
+                      r={activeCircle.r}
+                    />
+                  ) : null}
+                </>
+              ) : null}
+              <line
+                className="plot-axis"
+                x1={scaleX(0, heatmap)}
+                x2={scaleX(0, heatmap)}
+                y1={padding}
+                y2={height - padding}
+              />
+              <line
+                className="plot-axis"
+                x1={padding}
+                x2={width - padding}
+                y1={scaleZ(zoneMiddle, heatmap)}
+                y2={scaleZ(zoneMiddle, heatmap)}
+              />
+              <rect
+                className="strike-zone-box"
+                x={scaleX(zoneLeft, heatmap)}
+                y={scaleZ(zoneTop, heatmap)}
+                width={scaleX(zoneRight, heatmap) - scaleX(zoneLeft, heatmap)}
+                height={scaleZ(zoneBottom, heatmap) - scaleZ(zoneTop, heatmap)}
+              />
+              <text className="plot-label heatmap-side-label" x={padding} y={height - 14}>
+                {sideLabels.left}
+              </text>
+              <text
+                className="plot-label heatmap-side-label heatmap-side-label--right"
+                x={width - padding}
+                y={height - 14}
+              >
+                {sideLabels.right}
+              </text>
+            </svg>
+          </div>
         ) : null}
 
         {!isLoading && cells.length === 0 ? (
@@ -515,51 +625,70 @@ function PitchHeatmap({ heatmap, mode, isLoading, onModeChange }: PitchHeatmapPr
       </div>
 
       {selectionCircle ? (
-        <div className="pitch-detail-panel">
+        <div
+          className={
+            hasSelectedPitches
+              ? "pitch-detail-panel selection-panel heatmap-selection-panel"
+              : "pitch-detail-panel selection-panel heatmap-selection-panel heatmap-selection-panel--empty"
+          }
+        >
+          <div className="selection-panel-header">
+            <span>Selected Area</span>
+            <strong>
+              {hasSelectedPitches ? `${selectedSummary.pitchCount} pitches` : "No pitches"}
+            </strong>
+          </div>
           <div>
             <span>Selection</span>
-            <strong>{selectedSummary.cellCount} cells</strong>
+            <strong>
+              {hasSelectedPitches ? `${selectedSummary.pitchCount} pitches` : "No pitches"}
+            </strong>
           </div>
           <div>
             <span>Radius</span>
             <strong>{selectionCircle.r.toFixed(0)} px</strong>
           </div>
-          <div>
-            <span>Pitches</span>
-            <strong>{selectedSummary.pitchCount}</strong>
-          </div>
-          <div>
-            <span>Share</span>
-            <strong>{formatRate(selectedSummary.share)}</strong>
-          </div>
-          <div>
-            <span>Top Pitch</span>
-            <strong>
-              {selectedSummary.topPitchType ?? "-"} ({formatRate(selectedSummary.topPitchShare)})
-            </strong>
-          </div>
-          <div>
-            <span>Avg Velo</span>
-            <strong>{formatNumber(selectedSummary.averageVelocity)} mph</strong>
-          </div>
-          <div>
-            <span>Avg EV</span>
-            <strong>{formatNumber(selectedSummary.averageExitVelocity)} mph</strong>
-          </div>
-          <div>
-            <span>Max EV</span>
-            <strong>{formatNumber(selectedSummary.maxExitVelocity)} mph</strong>
-          </div>
+          {hasSelectedPitches ? (
+            <>
+              <div>
+                <span>Share</span>
+                <strong>{formatRate(selectedSummary.share)}</strong>
+              </div>
+              <div>
+                <span>Top Pitch</span>
+                <strong>
+                  {formatPitchType(selectedSummary.topPitchType)} ({formatRate(selectedSummary.topPitchShare)})
+                </strong>
+              </div>
+              <div>
+                <span>Avg Velo</span>
+                <strong>{formatNumber(selectedSummary.averageVelocity)} mph</strong>
+              </div>
+              <div>
+                <span>Avg EV</span>
+                <strong>{formatNumber(selectedSummary.averageExitVelocity)} mph</strong>
+              </div>
+              <div>
+                <span>Max EV</span>
+                <strong>{formatNumber(selectedSummary.maxExitVelocity)} mph</strong>
+              </div>
+            </>
+          ) : (
+            <div className="heatmap-empty-selection-message">
+              <span>Readout</span>
+              <strong>No actual pitches fall inside the circle. Faint color nearby is smoothed density.</strong>
+            </div>
+          )}
           <div>
             <span>Mode</span>
             <strong>{modeLabel}</strong>
           </div>
           <button
-            className="detail-close-button"
+            className="detail-close-button clear-selection-button"
             onClick={() => setSelectionCircle(null)}
             type="button"
           >
-            Clear
+            Clear Selection
           </button>
         </div>
       ) : null}

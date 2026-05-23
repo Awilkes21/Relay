@@ -5,10 +5,16 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from app.db.statcast import (
+    DEFAULT_STATCAST_PARQUET,
+    LEGACY_STATCAST_PARQUET,
+    duckdb_string_literal,
+    get_statcast_cache_metadata,
+    resolve_statcast_parquet,
+    statcast_connection,
+    table_columns,
+)
 
-DATA_DIR = Path(__file__).resolve().parents[3] / "data"
-DEFAULT_STATCAST_PARQUET = DATA_DIR / "statcast.parquet"
-LEGACY_STATCAST_PARQUET = DATA_DIR / "statcast_sample.parquet"
 ZONE_LEFT = -0.83
 ZONE_RIGHT = 0.83
 ZONE_BOTTOM = 1.5
@@ -221,22 +227,15 @@ def _rows_to_dicts(columns: list[str], rows: list[tuple[Any, ...]]) -> list[dict
 
 
 def _duckdb_string_literal(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
+    return duckdb_string_literal(value)
 
 
 def _table_columns(connection: Any, table_name: str) -> set[str]:
-    return {row[1] for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()}
+    return table_columns(connection, table_name)
 
 
 def _resolve_statcast_parquet(parquet_path: Path | str) -> Path:
-    resolved_path = Path(parquet_path)
-    if resolved_path == DEFAULT_STATCAST_PARQUET and not resolved_path.exists():
-        resolved_path = LEGACY_STATCAST_PARQUET
-
-    if not resolved_path.exists():
-        raise FileNotFoundError(f"Statcast parquet file not found: {resolved_path}")
-
-    return resolved_path
+    return resolve_statcast_parquet(parquet_path)
 
 
 def _filters_without(filters: dict[str, Any], *filter_names: str) -> dict[str, Any]:
@@ -247,23 +246,10 @@ def search_pitches(
     filters: dict[str, Any],
     parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
 ) -> dict[str, Any]:
-    try:
-        import duckdb
-    except ImportError as exc:
-        raise RuntimeError(
-            "duckdb is not installed. Run `pip install -r backend/requirements.txt`."
-        ) from exc
-
-    parquet_path = _resolve_statcast_parquet(parquet_path)
-
     query, params = _build_pitch_query(filters)
     count_query, count_params = _build_pitch_count_query(filters)
 
-    with duckdb.connect() as connection:
-        connection.execute(
-            "CREATE TEMP VIEW statcast_pitches AS "
-            f"SELECT * FROM read_parquet({_duckdb_string_literal(str(parquet_path))})"
-        )
+    with statcast_connection(parquet_path) as connection:
         total_count = int(connection.execute(count_query, count_params).fetchone()[0])
         cursor = connection.execute(query, params)
         columns = [description[0] for description in cursor.description]
@@ -280,22 +266,9 @@ def get_pitch_heatmap(
     mode: str = "all",
     parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
 ) -> dict[str, Any]:
-    try:
-        import duckdb
-    except ImportError as exc:
-        raise RuntimeError(
-            "duckdb is not installed. Run `pip install -r backend/requirements.txt`."
-        ) from exc
-
-    parquet_path = _resolve_statcast_parquet(parquet_path)
-
     query, params, domain = _build_pitch_heatmap_query(filters, x_bins, z_bins, mode=mode)
 
-    with duckdb.connect() as connection:
-        connection.execute(
-            "CREATE TEMP VIEW statcast_pitches AS "
-            f"SELECT * FROM read_parquet({_duckdb_string_literal(str(parquet_path))})"
-        )
+    with statcast_connection(parquet_path) as connection:
         rows = connection.execute(query, params).fetchall()
 
     max_count = max((row[2] for row in rows), default=0)
@@ -350,15 +323,6 @@ def list_pitch_filter_options(
     filters: dict[str, Any],
     parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
 ) -> dict[str, Any]:
-    try:
-        import duckdb
-    except ImportError as exc:
-        raise RuntimeError(
-            "duckdb is not installed. Run `pip install -r backend/requirements.txt`."
-        ) from exc
-
-    parquet_path = _resolve_statcast_parquet(parquet_path)
-
     def distinct_query(column_name: str, option_filters: dict[str, Any]) -> tuple[str, list[Any]]:
         where_sql, params = _build_where_clause(option_filters)
         query = (
@@ -401,12 +365,7 @@ def list_pitch_filter_options(
             else f" WHERE {column_name} IS NOT NULL"
         )
 
-    with duckdb.connect() as connection:
-        connection.execute(
-            "CREATE TEMP VIEW statcast_pitches AS "
-            f"SELECT * FROM read_parquet({_duckdb_string_literal(str(parquet_path))})"
-        )
-
+    with statcast_connection(parquet_path) as connection:
         columns = _table_columns(connection, "statcast_pitches")
         options: dict[str, Any] = {}
         for option_name, column_name in {
@@ -475,22 +434,19 @@ def list_pitch_filter_options(
 def list_cached_pitchers(
     parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
 ) -> list[dict[str, Any]]:
-    try:
-        import duckdb
-    except ImportError as exc:
-        raise RuntimeError(
-            "duckdb is not installed. Run `pip install -r backend/requirements.txt`."
-        ) from exc
-
-    parquet_path = _resolve_statcast_parquet(parquet_path)
-
-    with duckdb.connect() as connection:
+    with statcast_connection(parquet_path) as connection:
         cursor = connection.execute(
             "SELECT pitcher, player_name, count(*) AS pitch_count, "
             "min(game_date) AS first_game_date, max(game_date) AS last_game_date "
-            f"FROM read_parquet({_duckdb_string_literal(str(parquet_path))}) "
+            "FROM statcast_pitches "
             "GROUP BY pitcher, player_name "
             "ORDER BY player_name"
         )
         columns = [description[0] for description in cursor.description]
         return _rows_to_dicts(columns, cursor.fetchall())
+
+
+def get_cache_metadata(
+    parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
+) -> dict[str, Any]:
+    return get_statcast_cache_metadata(parquet_path)

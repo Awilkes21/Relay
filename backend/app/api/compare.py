@@ -26,6 +26,8 @@ def compare_pitcher(
     a_end: date = Query(),
     b_start: date = Query(),
     b_end: date = Query(),
+    pitch_type: str | None = Query(default=None, min_length=1),
+    batter_hand: str | None = Query(default=None, pattern="^[LR]$"),
 ) -> dict[str, Any]:
     if a_start > a_end:
         raise HTTPException(
@@ -53,6 +55,8 @@ def compare_pitcher(
             a_end,
             b_start,
             b_end,
+            pitch_type=pitch_type,
+            batter_hand=batter_hand,
         )
         comparison["movement"] = MOVEMENT_METADATA
         return comparison

@@ -25,6 +25,7 @@ class PitchesApiTests(unittest.TestCase):
             "pitch_type": "FF",
             "release_speed": 97.5,
             "release_spin_rate": 2450,
+            "arm_angle": 48.0,
             "pfx_x": -0.75,
             "pfx_z": 1.42,
             "plate_x": -0.2,
@@ -82,6 +83,7 @@ class PitchesApiTests(unittest.TestCase):
                         "release_spin_rate": 2450,
                         "release_pos_x": None,
                         "release_pos_z": None,
+                        "arm_angle": 48.0,
                         "pfx_x": -0.75,
                         "pfx_z": 1.42,
                         "plate_x": -0.2,
@@ -244,6 +246,25 @@ class PitchesApiTests(unittest.TestCase):
                 "location_filter": None,
             }
         )
+
+    def test_get_cache_metadata_returns_service_payload(self):
+        metadata = {
+            "path": "C:/repos/Relay/data/statcast.parquet",
+            "file_size_bytes": 123,
+            "pitch_count": 10,
+            "pitcher_count": 1,
+            "first_game_date": "2024-04-01",
+            "last_game_date": "2024-04-02",
+            "seasons": [2024],
+            "pitch_types": ["FF"],
+        }
+
+        with patch("app.api.pitches.get_cache_metadata", return_value=metadata) as get_metadata:
+            response = TestClient(app).get("/cache/metadata")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), metadata)
+        get_metadata.assert_called_once_with()
 
 
 if __name__ == "__main__":
