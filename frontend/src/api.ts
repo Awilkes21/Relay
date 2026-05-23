@@ -83,6 +83,43 @@ export type CachedPitchersResponse = {
   results: CachedPitcher[];
 };
 
+export type DataQualityMetric = {
+  key: string;
+  label: string;
+  fields: string[];
+  denominator: "all_pitches" | "balls_in_play" | string;
+  denominator_count: number;
+  available_count: number;
+  missing_count: number;
+  missing_rate: number | null;
+  available_rate: number | null;
+  missing_fields: string[];
+};
+
+export type CacheMetadataResponse = {
+  path: string;
+  file_size_bytes: number;
+  pitch_count: number;
+  pitcher_count: number;
+  first_game_date: string | null;
+  last_game_date: string | null;
+  seasons: number[];
+  pitch_types: string[];
+  data_quality: {
+    pitch_count: number;
+    metrics: DataQualityMetric[];
+  };
+  source?: "manifest" | "manifest+duckdb" | "duckdb" | string;
+  manifest?: {
+    path: string;
+    generated_at: string | null;
+    date_range: {
+      start: string;
+      end: string;
+    } | null;
+  };
+};
+
 export type PitchFilterOptions = {
   seasons: number[];
   game_dates: Array<{
@@ -208,6 +245,13 @@ export type PitcherCompareResponse = {
     metrics: PeriodMetrics;
   };
   deltas: CompareDelta;
+  chart_data?: {
+    heatmap_mode: HeatmapMode;
+    heatmaps: {
+      period_a: PitchHeatmapResponse;
+      period_b: PitchHeatmapResponse;
+    };
+  };
 };
 
 export type SavedComparison = {
@@ -238,6 +282,16 @@ export async function getPitchers(): Promise<CachedPitchersResponse> {
 
   if (!response.ok) {
     throw new Error(await responseError(response, `Pitchers returned ${response.status}`));
+  }
+
+  return response.json();
+}
+
+export async function getCacheMetadata(): Promise<CacheMetadataResponse> {
+  const response = await fetch(`${API_URL}/cache/metadata`);
+
+  if (!response.ok) {
+    throw new Error(await responseError(response, `Cache metadata returned ${response.status}`));
   }
 
   return response.json();
@@ -331,6 +385,7 @@ export async function getPitchHeatmap(
 
 export async function comparePitcher(
   filters: CompareFilters,
+  heatmapMode: HeatmapMode = "all",
 ): Promise<PitcherCompareResponse> {
   const params = new URLSearchParams();
 
@@ -340,6 +395,8 @@ export async function comparePitcher(
       params.set(key, trimmedValue);
     }
   });
+  params.set("heatmap_mode", heatmapMode);
+  params.set("include_heatmaps", "true");
 
   const response = await fetch(`${API_URL}/compare/pitcher?${params.toString()}`);
 

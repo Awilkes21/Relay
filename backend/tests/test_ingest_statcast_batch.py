@@ -74,13 +74,14 @@ class IngestStatcastBatchTests(unittest.TestCase):
             summary = summarize_parquet(parquet_path)
 
         self.assertTrue(summary["exists"])
-        self.assertEqual(summary["row_count"], 3)
+        self.assertEqual(summary["row_count"], 2)
         self.assertEqual(summary["pitcher_count"], 2)
         self.assertEqual(summary["pitch_types"], ["FF", "SL"])
         self.assertEqual(
             [(pitcher["pitcher_id"], pitcher["row_count"]) for pitcher in summary["pitchers"]],
-            [(605400, 2), (669373, 1)],
+            [(605400, 1), (669373, 1)],
         )
+        self.assertIn("data_quality", summary)
 
     def test_builds_and_writes_manifest(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -106,6 +107,7 @@ class IngestStatcastBatchTests(unittest.TestCase):
             self.assertTrue(manifest_path.exists())
             self.assertEqual(manifest["cache"]["row_count"], 1)
             self.assertEqual(manifest["date_range"]["start"], "2024-04-01")
+            self.assertIn("data_quality", manifest["cache"])
 
 
 if __name__ == "__main__":

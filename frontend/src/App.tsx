@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   API_URL,
   type CachedPitcher,
+  type CacheMetadataResponse,
   type CompareFilters,
   type HeatmapMode,
   type PitchHeatmapResponse,
@@ -11,6 +12,7 @@ import {
   type PitchResult,
   type SavedComparison,
   comparePitcher,
+  getCacheMetadata,
   getPitchHeatmap,
   getHealth,
   getPitchFilterOptions,
@@ -360,8 +362,14 @@ function formatBatter(pitch: PitchResult) {
   return pitch.batter_name ?? "";
 }
 
+function formatPersonName(value: string | null | undefined) {
+  if (!value) return "";
+  const parts = value.split(",").map((part) => part.trim()).filter(Boolean);
+  return parts.length === 2 ? `${parts[1]} ${parts[0]}` : value;
+}
+
 function searchFiltersPitcherName(filters: Pick<CompareFilters, "pitcher_name" | "pitcher_id">) {
-  return filters.pitcher_name || (filters.pitcher_id ? `Pitcher ${filters.pitcher_id}` : "selected pitcher");
+  return formatPersonName(filters.pitcher_name) || (filters.pitcher_id ? "selected pitcher" : "selected pitcher");
 }
 
 function pitchSortValue(pitch: PitchResult, key: PitchSortKey) {
@@ -502,6 +510,7 @@ function App() {
   }>({ key: "game_date", direction: "desc" });
   const [pitchers, setPitchers] = useState<CachedPitcher[]>([]);
   const [pitcherError, setPitcherError] = useState<string | null>(null);
+  const [cacheMetadata, setCacheMetadata] = useState<CacheMetadataResponse | null>(null);
   const [pitchOptions, setPitchOptions] = useState<PitchFilterOptions>(emptyPitchOptions);
   const [compareOptions, setCompareOptions] = useState<PitchFilterOptions>(emptyPitchOptions);
   const [pitchOptionsError, setPitchOptionsError] = useState<string | null>(null);
@@ -580,10 +589,17 @@ function App() {
   }, []);
 
   useEffect(() => {
+    getCacheMetadata()
+      .then((metadata) => setCacheMetadata(metadata))
+      .catch(() => setCacheMetadata(null));
+  }, []);
+
+  useEffect(() => {
     const timeoutId = window.setTimeout(() => {
+      const pitcher = resolvableExplorerPitcher();
       getPitchFilterOptions({
-        pitcher_id: filters.pitcher_id,
-        pitcher_name: filters.pitcher_name,
+        pitcher_id: pitcher ? String(pitcher.pitcher) : filters.pitcher_id,
+        pitcher_name: pitcher ? "" : filters.pitcher_name,
         season: filters.season,
         start_date: filters.start_date,
         end_date: filters.end_date,
@@ -659,7 +675,7 @@ function App() {
     const timeoutId = window.setTimeout(() => {
       getPitchFilterOptions({
         pitcher_id: String(pitcher.pitcher),
-        pitcher_name: pitcher.player_name,
+        pitcher_name: "",
       })
         .then((options) => setCompareOptions(options))
         .catch(() => setCompareOptions(emptyPitchOptions));
@@ -675,10 +691,12 @@ function App() {
   ) {
     const normalizedPitcherId = pitcherId?.trim() ?? "";
     const normalizedPitcherName = pitcherName?.trim().toLowerCase() ?? "";
+    const displayName = formatPersonName(pitcher.player_name).toLowerCase();
     return (
       String(pitcher.pitcher) === normalizedPitcherId ||
       (normalizedPitcherName.length > 0 &&
-        pitcher.player_name.toLowerCase() === normalizedPitcherName)
+        (pitcher.player_name.toLowerCase() === normalizedPitcherName ||
+          displayName === normalizedPitcherName))
     );
   }
 
@@ -721,20 +739,20 @@ function App() {
     if (!query) return null;
 
     const rankedMatches = [
-      pitchers.filter((pitcher) => pitcher.player_name.toLowerCase() === query),
+      pitchers.filter((pitcher) => formatPersonName(pitcher.player_name).toLowerCase() === query),
       pitchers.filter((pitcher) =>
-        pitcher.player_name
+        formatPersonName(pitcher.player_name)
           .toLowerCase()
           .split(/\s+/)
           .some((token) => token === query),
       ),
       pitchers.filter((pitcher) =>
-        pitcher.player_name
+        formatPersonName(pitcher.player_name)
           .toLowerCase()
           .split(/\s+/)
           .some((token) => token.startsWith(query)),
       ),
-      pitchers.filter((pitcher) => pitcher.player_name.toLowerCase().includes(query)),
+      pitchers.filter((pitcher) => formatPersonName(pitcher.player_name).toLowerCase().includes(query)),
     ];
 
     for (const matches of rankedMatches) {
@@ -749,11 +767,32 @@ function App() {
     return null;
   }
 
-  function completePitcherName<T extends Pick<PitchFilters, "pitcher_name">>(
+  function completePitcherName<T extends Pick<PitchFilters, "pitcher_id" | "pitcher_name">>(
     currentFilters: T,
   ) {
-    const match = bestPitcherNameMatch(currentFilters.pitcher_name ?? "");
-    return match ? { ...currentFilters, pitcher_name: match.player_name } : currentFilters;
+    const match =
+      selectedPitcherForFilters(currentFilters) ??
+      bestPitcherNameMatch(currentFilters.pitcher_name ?? "");
+    return match
+      ? {
+          ...currentFilters,
+          pitcher_id: String(match.pitcher),
+          pitcher_name: formatPersonName(match.player_name),
+        }
+      : currentFilters;
+  }
+
+  function pitcherIdQueryFilters<T extends Pick<PitchFilters, "pitcher_id" | "pitcher_name">>(
+    currentFilters: T,
+  ) {
+    const match = selectedPitcherForFilters(currentFilters);
+    return match
+      ? {
+          ...currentFilters,
+          pitcher_id: String(match.pitcher),
+          pitcher_name: "",
+        }
+      : currentFilters;
   }
 
   function datasetFreshness() {
@@ -848,6 +887,7 @@ function App() {
       [name]: value,
       ...(name === "pitcher_name"
         ? {
+            pitcher_id: "",
             season: "",
             single_game: "",
             start_date: "",
@@ -998,6 +1038,7 @@ function App() {
     if (name === "description") return formatDescription(value);
     if (name === "events") return formatEvent(value);
     if (name === "single_game") return formatDate(value);
+    if (name === "pitcher_name") return formatPersonName(value);
     if (name === "pitch_type") return formatPitchTypeWithCode(value);
     if (name === "count") return value;
     if (name === "result_order") {
@@ -1016,6 +1057,7 @@ function App() {
         (entry): entry is [keyof PitchFilters, string] =>
           Boolean(entry[1]?.trim()) &&
           entry[1] !== initialFilters[entry[0] as keyof PitchFilters] &&
+          entry[0] !== "pitcher_id" &&
           entry[0] !== "balls" &&
           entry[0] !== "strikes",
       )
@@ -1057,7 +1099,10 @@ function App() {
 
   function activeCompareFilters() {
     return Object.entries(compareFilters)
-      .filter((entry): entry is [keyof CompareFilters, string] => Boolean(entry[1]?.trim()))
+      .filter(
+        (entry): entry is [keyof CompareFilters, string] =>
+          Boolean(entry[1]?.trim()) && entry[0] !== "pitcher_id",
+      )
       .map(([name, value]) => ({
         name,
         label: compareFieldLabel(name),
@@ -1207,15 +1252,16 @@ function App() {
     setSearchError(null);
 
     try {
+      const queryFilters = pitcherIdQueryFilters(searchFilters);
       const [response, heatmapResponse] = await Promise.all([
-        searchPitches(searchFilters),
-        getPitchHeatmap(searchFilters, heatmapMode),
+        searchPitches(queryFilters),
+        getPitchHeatmap(queryFilters, heatmapMode),
       ]);
       setResults(response.results);
       setResultCount(response.count);
       setTotalResultCount(response.total_count);
       setHeatmap(heatmapResponse);
-      setLastPitchSearchFilters(searchFilters);
+      setLastPitchSearchFilters(queryFilters);
     } catch (error) {
       setResults([]);
       setResultCount(0);
@@ -1253,7 +1299,7 @@ function App() {
     const pitcher = selectedPitcherForFilters(filters);
     return {
       pitcher_id: pitcher ? String(pitcher.pitcher) : filters.pitcher_id,
-      pitcher_name: filters.pitcher_name,
+      pitcher_name: "",
       start_date: period === "a" ? filters.a_start : filters.b_start,
       end_date: period === "a" ? filters.a_end : filters.b_end,
       pitch_type: pitchTypeOverride ?? filters.pitch_type,
@@ -1340,13 +1386,15 @@ function App() {
     setCompareError(null);
 
     try {
-      const response = await comparePitcher(searchFilters);
+      const queryFilters = pitcherIdQueryFilters(searchFilters);
+      const response = await comparePitcher(queryFilters, compareHeatmapMode);
       setComparison(response);
       setComparePitchTypes(collectPitchTypes(response));
+      setCompareHeatmapA(response.chart_data?.heatmaps.period_a ?? null);
+      setCompareHeatmapB(response.chart_data?.heatmaps.period_b ?? null);
       setDrilldownPitchType(null);
       setDrilldownA([]);
       setDrilldownB([]);
-      await loadCompareHeatmaps(searchFilters);
     } catch (error) {
       setComparison(null);
       setCompareHeatmapA(null);
@@ -1461,6 +1509,7 @@ function App() {
     () => activeCompareFilters(),
     [compareFilters],
   );
+  const dataQualityMetrics = cacheMetadata?.data_quality?.metrics ?? [];
 
   function saveCurrentComparison() {
     if (!comparisonName.trim()) return;
@@ -1510,7 +1559,7 @@ function App() {
       {freshness ? <div className="data-freshness">Cache: {freshness}</div> : null}
       <datalist id="cached-pitchers">
         {pitchers.map((pitcher) => (
-          <option key={pitcher.pitcher} value={pitcher.player_name} />
+          <option key={pitcher.pitcher} value={formatPersonName(pitcher.player_name)} />
         ))}
       </datalist>
       <datalist id="pitch-descriptions">
@@ -1532,6 +1581,7 @@ function App() {
           pitchOptionsError,
           selectedExplorerPitcher,
           formatDate,
+          formatPersonName,
           resolvableExplorerPitcher,
           renderPitchFilterField,
           pitchField,
@@ -1561,7 +1611,8 @@ function App() {
           formatValue,
           formatBreak,
           formatDescription,
-          formatEvent
+          formatEvent,
+          dataQualityMetrics
         }}
       />
 

@@ -257,6 +257,23 @@ class PitchesApiTests(unittest.TestCase):
             "last_game_date": "2024-04-02",
             "seasons": [2024],
             "pitch_types": ["FF"],
+            "data_quality": {
+                "pitch_count": 10,
+                "metrics": [
+                    {
+                        "key": "arm_angle",
+                        "label": "Arm Angle",
+                        "fields": ["arm_angle"],
+                        "denominator": "all_pitches",
+                        "denominator_count": 10,
+                        "available_count": 8,
+                        "missing_count": 2,
+                        "missing_rate": 0.2,
+                        "available_rate": 0.8,
+                        "missing_fields": [],
+                    }
+                ],
+            },
         }
 
         with patch("app.api.pitches.get_cache_metadata", return_value=metadata) as get_metadata:

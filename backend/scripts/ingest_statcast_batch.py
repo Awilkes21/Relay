@@ -9,6 +9,18 @@ from typing import Any
 from ingest_statcast import fetch_statcast_pitcher, resolve_pitcher_id, save_parquet
 
 
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from app.db.statcast import (  # noqa: E402
+    STATCAST_VIEW_NAME,
+    data_quality_report,
+    statcast_connection,
+    table_columns,
+)
+
+
 LOGGER = logging.getLogger("relay.ingest_statcast_batch")
 UNKNOWN_PITCH_TYPES = {"", "unknown", "unkown", "un"}
 
@@ -43,17 +55,6 @@ def parse_args() -> argparse.Namespace:
 
 def unique_preserving_order(values: list[int]) -> list[int]:
     return list(dict.fromkeys(values))
-
-
-def import_duckdb() -> Any:
-    try:
-        import duckdb
-    except ImportError as exc:
-        raise RuntimeError(
-            "duckdb is not installed. Run `pip install -r backend/requirements.txt`."
-        ) from exc
-
-    return duckdb
 
 
 def json_value(value: Any) -> Any:
@@ -107,28 +108,35 @@ def summarize_parquet(output_path: Path) -> dict[str, Any]:
             "pitch_types": [],
         }
 
-    duckdb = import_duckdb()
-    escaped_output = output_path.as_posix().replace("'", "''")
-    unknown_pitch_types = ", ".join(f"'{value}'" for value in sorted(UNKNOWN_PITCH_TYPES))
-    with duckdb.connect() as connection:
+    with statcast_connection(output_path) as connection:
+        columns = table_columns(connection)
         row = connection.execute(
             "SELECT count(*) AS row_count, count(DISTINCT pitcher) AS pitcher_count, "
             "min(game_date) AS first_game_date, max(game_date) AS last_game_date "
-            f"FROM read_parquet('{escaped_output}')"
+            f"FROM {STATCAST_VIEW_NAME}"
         ).fetchone()
         pitchers = connection.execute(
             "SELECT pitcher AS pitcher_id, any_value(player_name) AS player_name, "
             "count(*) AS row_count, min(game_date) AS first_game_date, "
             "max(game_date) AS last_game_date "
-            f"FROM read_parquet('{escaped_output}') "
+            f"FROM {STATCAST_VIEW_NAME} "
             "GROUP BY pitcher ORDER BY player_name"
         ).fetchall()
         pitch_types = connection.execute(
-            f"SELECT DISTINCT pitch_type FROM read_parquet('{escaped_output}') "
-            "WHERE pitch_type IS NOT NULL "
-            f"AND lower(trim(CAST(pitch_type AS VARCHAR))) NOT IN ({unknown_pitch_types}) "
-            "ORDER BY pitch_type"
+            f"SELECT DISTINCT pitch_type FROM {STATCAST_VIEW_NAME} ORDER BY pitch_type"
         ).fetchall()
+        seasons = (
+            [
+                int(season)
+                for (season,) in connection.execute(
+                    f"SELECT DISTINCT game_year FROM {STATCAST_VIEW_NAME} "
+                    "WHERE game_year IS NOT NULL ORDER BY game_year"
+                ).fetchall()
+            ]
+            if "game_year" in columns
+            else []
+        )
+        quality = data_quality_report(connection)
 
     return {
         "exists": True,
@@ -136,6 +144,7 @@ def summarize_parquet(output_path: Path) -> dict[str, Any]:
         "pitcher_count": int(row[1]),
         "first_game_date": json_value(row[2]),
         "last_game_date": json_value(row[3]),
+        "seasons": seasons,
         "pitchers": [
             {
                 "pitcher_id": int(pitcher_id) if pitcher_id is not None else None,
@@ -147,6 +156,7 @@ def summarize_parquet(output_path: Path) -> dict[str, Any]:
             for pitcher_id, player_name, row_count, first_game_date, last_game_date in pitchers
         ],
         "pitch_types": [pitch_type for (pitch_type,) in pitch_types],
+        "data_quality": quality,
     }
 
 

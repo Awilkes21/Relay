@@ -6,6 +6,7 @@ import { formatPitchType } from "../pitchTypes";
 type PitchExplorerViewContext = Record<string, any> & {
   activePitchFilterList: any[];
   arsenalSummary: any[];
+  dataQualityMetrics: any[];
   results: any[];
   sortedResults: any[];
 };
@@ -22,6 +23,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
     pitchOptionsError,
     selectedExplorerPitcher,
     formatDate,
+    formatPersonName,
     resolvableExplorerPitcher,
     renderPitchFilterField,
     pitchField,
@@ -51,8 +53,17 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
     formatValue,
     formatBreak,
     formatDescription,
-    formatEvent
+    formatEvent,
+    dataQualityMetrics
   } = context;
+
+  function formatQualityRate(value: number | null | undefined) {
+    return value === null || value === undefined ? "-" : `${Math.round(value * 100)}%`;
+  }
+
+  function qualityScopeLabel(scope: string) {
+    return scope === "balls_in_play" ? "BIP" : "pitches";
+  }
 
   return (
       <section
@@ -75,7 +86,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
             </div>
           ) : resolvableExplorerPitcher() ? (
             <div className="inline-note pitcher-first-note">
-              Press Search or leave the field to use {resolvableExplorerPitcher()?.player_name}.
+              Press Search or leave the field to use {formatPersonName(resolvableExplorerPitcher()?.player_name)}.
             </div>
           ) : (
             <div className="inline-note pitcher-first-note">
@@ -185,6 +196,35 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
 
         {searchError ? <div className="error-banner">{searchError}</div> : null}
 
+        {dataQualityMetrics.length > 0 ? (
+          <section className="chart-panel data-quality-panel">
+            <div className="chart-heading">
+              <div>
+                <h3>Data Quality</h3>
+                <p>Availability for fields Relay uses in charts, movement, and contact views.</p>
+              </div>
+              <span>Current cache</span>
+            </div>
+            <div className="data-quality-grid">
+              {dataQualityMetrics.map((metric) => (
+                <div className="data-quality-card" key={metric.key}>
+                  <span>{metric.label}</span>
+                  <strong>{formatQualityRate(metric.available_rate)}</strong>
+                  <small>
+                    {metric.available_count} of {metric.denominator_count}{" "}
+                    {qualityScopeLabel(metric.denominator)} available
+                  </small>
+                  {metric.missing_fields.length > 0 ? (
+                    <small>Missing column: {metric.missing_fields.join(", ")}</small>
+                  ) : (
+                    <small>{formatQualityRate(metric.missing_rate)} missing</small>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
         <div className="results-header">
           <h3>Results</h3>
           <span>
@@ -201,7 +241,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
                 "relay-pitches.csv",
                 results.map((pitch) => ({
                   game_date: formatDate(pitch.game_date),
-                  player_name: pitch.player_name,
+                  player_name: formatPersonName(pitch.player_name),
                   batter: formatBatter(pitch),
                   batter_hand: pitch.stand,
                   pitch_type: pitch.pitch_type,
@@ -312,7 +352,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
                     key={`${pitch.game_date}-${pitch.pitcher}-${pitch.batter}-${index}`}
                   >
                     <td>{formatDate(pitch.game_date)}</td>
-                    <td>{formatValue(pitch.player_name)}</td>
+                    <td>{formatPersonName(pitch.player_name)}</td>
                     <td>{formatBatter(pitch)}</td>
                     <td>{formatPitchType(pitch.pitch_type)}</td>
                     <td>{formatValue(pitch.release_speed)}</td>
