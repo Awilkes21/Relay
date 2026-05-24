@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import type { PitchHeatmapCell, PitchHeatmapResponse } from "../api";
+import Icon from "./Icon";
 import { formatPitchType } from "../pitchTypes";
 import { countLabel } from "../text";
 
@@ -416,7 +417,7 @@ function CompareDeltaHeatmap({
             title={isCollapsed ? "Expand" : "Collapse"}
             type="button"
           >
-            {isCollapsed ? "+" : "-"}
+            <Icon name={isCollapsed ? "chevronRight" : "chevronDown"} />
           </button>
         </div>
       </div>

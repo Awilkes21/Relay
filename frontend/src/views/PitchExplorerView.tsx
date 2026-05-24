@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import MovementChart from "../components/MovementChart";
 import PitchHeatmap from "../components/PitchHeatmap";
 import StrikeZoneChart from "../components/StrikeZoneChart";
-import { formatPitchType } from "../pitchTypes";
+import Icon from "../components/Icon";
+import { formatPitchType, formatPitchTypeWithCode } from "../pitchTypes";
 import { countLabel } from "../text";
 
 type PitchExplorerViewContext = Record<string, any> & {
@@ -10,6 +11,11 @@ type PitchExplorerViewContext = Record<string, any> & {
   arsenalSummary: any[];
   dataQualityMetrics: any[];
   dataQualityPitchCount: number;
+  noResultsDiagnostics: Array<{
+    label: string;
+    status: "ok" | "warning" | "fail" | "unknown";
+    detail: string;
+  }>;
   results: any[];
   sortedResults: any[];
 };
@@ -23,6 +29,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
   const {
     pitcherError,
     pitchOptionsError,
+    filters,
     selectedExplorerPitcher,
     formatDate,
     formatPersonName,
@@ -58,6 +65,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
     formatEvent,
     dataQualityMetrics,
     dataQualityPitchCount,
+    noResultsDiagnostics,
     explorerFocus,
     lastAppliedQuery,
     focusedResultTarget
@@ -65,6 +73,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
   const hasSearchResults = totalResultCount > 0 || results.length > 0;
   const isFocusedResult = Boolean(focusedResultTarget);
   const activeFocusTarget = explorerFocus?.target || focusedResultTarget;
+  const shouldShowNoResultsDiagnostics = !isSearching && results.length === 0 && noResultsDiagnostics.length > 0;
   const [isSearchCollapsed, setIsSearchCollapsed] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState({
     dataQuality: true,
@@ -127,7 +136,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
   }
 
   function disclosureIcon(isCollapsed: boolean) {
-    return isCollapsed ? "+" : "-";
+    return <Icon name={isCollapsed ? "chevronRight" : "chevronDown"} />;
   }
 
   function formatQualityRate(value: number | null | undefined) {
@@ -145,8 +154,131 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
     return scope === "balls_in_play" ? "BIP" : "pitches";
   }
 
+  function renderNoResultsDiagnostics() {
+    if (!noResultsDiagnostics.length) return null;
+
+    const statusLabels = {
+      ok: "Yes",
+      warning: "Maybe",
+      fail: "No",
+      unknown: "Check",
+    };
+
+    return (
+      <div className="no-results-diagnostics">
+        <div className="no-results-diagnostics-heading">Why no results?</div>
+        <div className="no-results-diagnostics-grid">
+          {noResultsDiagnostics.map((diagnostic) => (
+            <div
+              className={`diagnostic-item diagnostic-item--${diagnostic.status}`}
+              key={diagnostic.label}
+            >
+              <span>{diagnostic.label}</span>
+              <strong>{statusLabels[diagnostic.status]}</strong>
+              <small>{diagnostic.detail}</small>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  function qualityMetric(key: string) {
+    return dataQualityMetrics.find((metric) => metric.key === key);
+  }
+
+  function movementQualityNote() {
+    const armAngle = qualityMetric("arm_angle");
+    if (!armAngle || armAngle.denominator_count === 0 || armAngle.missing_count === 0) return null;
+    if ((armAngle.available_rate ?? 1) >= 0.95 && armAngle.missing_count < 10) return null;
+
+    return (
+      <div className="contextual-quality-note">
+        Arm angle is available for {armAngle.available_count} of {countLabel(armAngle.denominator_count, "matching pitch")};
+        arm-slot references may be incomplete.
+      </div>
+    );
+  }
+
+  function usesContactContext() {
+    return (
+      heatmapMode === "hard_contact" ||
+      Boolean(filters.description) ||
+      Boolean(filters.events) ||
+      activeFocusTarget === "table"
+    );
+  }
+
+  function battedBallQualityNote() {
+    if (!usesContactContext()) return null;
+
+    const battedBall = qualityMetric("batted_ball");
+    if (!battedBall) return null;
+    if (battedBall.denominator_count === 0) {
+      return (
+        <div className="contextual-quality-note">
+          No balls in play matched these filters, so batted-ball metrics are unavailable.
+        </div>
+      );
+    }
+    if ((battedBall.available_rate ?? 1) >= 0.9 && battedBall.denominator_count >= 20) return null;
+
+    return (
+      <div className="contextual-quality-note">
+        Batted-ball metrics are based on {battedBall.available_count} of{" "}
+        {countLabel(battedBall.denominator_count, "ball in play")} for these filters.
+      </div>
+    );
+  }
+
   function shouldShowResult(targets: string[]) {
     return !isFocusedResult || targets.includes(focusedResultTarget);
+  }
+
+  function batterSideLabel(value: string) {
+    if (value === "L") return "vs LHH";
+    if (value === "R") return "vs RHH";
+    return "vs both sides";
+  }
+
+  function pitchScopeLabel() {
+    if (filters.pitch_type) return formatPitchTypeWithCode(filters.pitch_type);
+    if (filters.pitch_type_group) {
+      const groupLabels: Record<string, string> = {
+        fastball: "Fastballs",
+        breaking: "Breaking Balls",
+        offspeed: "Offspeed",
+      };
+      return groupLabels[filters.pitch_type_group] ?? filters.pitch_type_group;
+    }
+    return "All pitches";
+  }
+
+  function timeScopeLabel() {
+    if (filters.single_game) return formatDate(filters.single_game);
+    if (filters.season) return filters.season;
+    if (filters.start_date && filters.end_date) {
+      return `${formatDate(filters.start_date)} - ${formatDate(filters.end_date)}`;
+    }
+    if (filters.start_date) return `Since ${formatDate(filters.start_date)}`;
+    if (filters.end_date) return `Through ${formatDate(filters.end_date)}`;
+    return "All dates";
+  }
+
+  function collapsedSearchSummary() {
+    const pitcher =
+      formatPersonName(selectedExplorerPitcher()?.player_name) ||
+      formatPersonName(resolvableExplorerPitcher()?.player_name) ||
+      formatPersonName(filters.pitcher_name) ||
+      "Selected pitcher";
+
+    return [
+      pitcher,
+      timeScopeLabel(),
+      pitchScopeLabel(),
+      batterSideLabel(filters.batter_hand),
+      countLabel(totalResultCount, "pitch"),
+    ].join(" | ");
   }
 
   return (
@@ -170,10 +302,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
           <div className="collapsed-search-bar">
             <div>
               <span>Pitch Explorer Search</span>
-              <strong>
-                {countLabel(totalResultCount, "matching pitch", "matching pitches")}
-                {activePitchFilterList.length > 0 ? ` | ${countLabel(activePitchFilterList.length, "filter")}` : ""}
-              </strong>
+              <strong>{collapsedSearchSummary()}</strong>
             </div>
             <button
               className="secondary-button"
@@ -284,7 +413,12 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
                   type="button"
                   onClick={() => removePitchFilter(filter.name)}
                 >
-                  {filter.label}: {filter.value} Clear
+                  <span>
+                    {filter.label}: {filter.value}
+                  </span>
+                  <strong aria-hidden="true" className="filter-chip-remove">
+                    ×
+                  </strong>
                 </button>
               ))}
             </div>
@@ -308,6 +442,15 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
         </form>
 
         {searchError ? <div className="error-banner">{searchError}</div> : null}
+
+        {shouldShowNoResultsDiagnostics ? (
+          <>
+            <div className="focused-empty-notice">
+              No pitches matched this query. Try removing or modifying some filters.
+            </div>
+            {renderNoResultsDiagnostics()}
+          </>
+        ) : null}
 
         {dataQualityPitchCount > 0 && dataQualityMetrics.length > 0 && shouldShowResult(["data_quality"]) ? (
           <section className="chart-panel data-quality-panel focus-scroll-target" id="relay-data-quality">
@@ -364,48 +507,6 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
           </div>
         </div>
         ) : null}
-        {results.length > 0 && !isFocusedResult ? (
-          <button
-            className="secondary-button"
-            onClick={() =>
-              downloadCsv(
-                "relay-pitches.csv",
-                results.map((pitch) => ({
-                  game_date: formatDate(pitch.game_date),
-                  player_name: formatPersonName(pitch.player_name),
-                  batter: formatBatter(pitch),
-                  batter_hand: pitch.stand,
-                  pitch_type: pitch.pitch_type,
-                  release_speed: pitch.release_speed,
-                  release_spin_rate: pitch.release_spin_rate,
-                  p_throws: pitch.p_throws,
-                  release_pos_x: pitch.release_pos_x,
-                  release_pos_z: pitch.release_pos_z,
-                  ivb_inches: pitch.pfx_z === null ? null : pitch.pfx_z * 12,
-                  hb_inches: pitch.pfx_x === null ? null : pitch.pfx_x * 12,
-                  plate_location: describePlateLocation(pitch),
-                  plate_x: pitch.plate_x,
-                  plate_z: pitch.plate_z,
-                  batted_ball_type: formatBattedBall(pitch.bb_type),
-                  exit_velocity: pitch.launch_speed,
-                  launch_angle: pitch.launch_angle,
-                  estimated_distance: pitch.hit_distance_sc,
-                  expected_ba: pitch.estimated_ba_using_speedangle,
-                  expected_woba: pitch.estimated_woba_using_speedangle,
-                  woba_value: pitch.woba_value,
-                  balls: pitch.balls,
-                  strikes: pitch.strikes,
-                  description: pitch.description,
-                  events: pitch.events,
-                })),
-              )
-            }
-            type="button"
-          >
-            Export Results CSV
-          </button>
-        ) : null}
-
         {arsenalSummary.length > 0 && shouldShowResult(["arsenal"]) ? (
           <section className="chart-panel focus-scroll-target" id="relay-arsenal-summary">
             <div className="chart-heading collapsible-heading">
@@ -455,6 +556,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
         ) : null}
         {shouldShowResult(["heatmap"]) ? (
         <div className="focus-scroll-target" id="relay-pitch-heatmap">
+          {heatmapMode === "hard_contact" ? battedBallQualityNote() : null}
           <PitchHeatmap
             heatmap={heatmap}
             mode={heatmapMode}
@@ -471,6 +573,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
         ) : null}
         {shouldShowResult(["movement"]) ? (
         <div className="focus-scroll-target" id="relay-movement">
+          {movementQualityNote()}
           <MovementChart pitches={results} />
         </div>
         ) : null}
@@ -485,15 +588,59 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
                   : countLabel(resultCount, "pitch")}
               </strong>
             </div>
-            <button
-              aria-label={collapsedSections.resultsTable ? "Expand pitch table" : "Collapse pitch table"}
-              className="disclosure-button"
-              onClick={() => toggleSection("resultsTable")}
-              title={collapsedSections.resultsTable ? "Expand" : "Collapse"}
-              type="button"
-            >
-              {disclosureIcon(collapsedSections.resultsTable)}
-            </button>
+            <div className="results-header-actions">
+              {!isFocusedResult ? (
+                <button
+                  className="secondary-button compact-action-button"
+                  onClick={() =>
+                    downloadCsv(
+                      "relay-pitches.csv",
+                      results.map((pitch) => ({
+                        game_date: formatDate(pitch.game_date),
+                        player_name: formatPersonName(pitch.player_name),
+                        batter: formatBatter(pitch),
+                        batter_hand: pitch.stand,
+                        pitch_type: pitch.pitch_type,
+                        release_speed: pitch.release_speed,
+                        release_spin_rate: pitch.release_spin_rate,
+                        p_throws: pitch.p_throws,
+                        release_pos_x: pitch.release_pos_x,
+                        release_pos_z: pitch.release_pos_z,
+                        ivb_inches: pitch.pfx_z === null ? null : pitch.pfx_z * 12,
+                        hb_inches: pitch.pfx_x === null ? null : pitch.pfx_x * 12,
+                        plate_location: describePlateLocation(pitch),
+                        plate_x: pitch.plate_x,
+                        plate_z: pitch.plate_z,
+                        batted_ball_type: formatBattedBall(pitch.bb_type),
+                        exit_velocity: pitch.launch_speed,
+                        launch_angle: pitch.launch_angle,
+                        estimated_distance: pitch.hit_distance_sc,
+                        expected_ba: pitch.estimated_ba_using_speedangle,
+                        expected_woba: pitch.estimated_woba_using_speedangle,
+                        woba_value: pitch.woba_value,
+                        balls: pitch.balls,
+                        strikes: pitch.strikes,
+                        description: pitch.description,
+                        events: pitch.events,
+                      })),
+                    )
+                  }
+                  type="button"
+                >
+                  Export CSV
+                </button>
+              ) : null}
+              <button
+                aria-label={collapsedSections.resultsTable ? "Expand pitch table" : "Collapse pitch table"}
+                className="disclosure-button"
+                onClick={() => toggleSection("resultsTable")}
+                title={collapsedSections.resultsTable ? "Expand" : "Collapse"}
+                type="button"
+              >
+                {disclosureIcon(collapsedSections.resultsTable)}
+              </button>
+            </div>
+            {battedBallQualityNote()}
           </div>
         ) : null}
 

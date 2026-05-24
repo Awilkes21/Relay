@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { PitcherCompareResponse } from "../api";
 import { formatPitchType } from "../pitchTypes";
 import { countLabel } from "../text";
+import Icon from "./Icon";
 
 type CompareMovementChartProps = {
   comparison: PitcherCompareResponse;
@@ -67,9 +68,25 @@ function formatNumber(value: number | null | undefined, digits = 1) {
   return value === null || value === undefined ? "-" : value.toFixed(digits);
 }
 
+function truncateLabel(value: string, maxLength = 24) {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
+}
+
 function compactPeriodLabel(label: string) {
   const match = label.match(/^Period\s+([AB12])/i);
-  return match ? `P${match[1].toUpperCase()}` : label;
+  if (!match) {
+    return label;
+  }
+
+  const period = match[1].toUpperCase();
+  if (period === "A") {
+    return "P1";
+  }
+  if (period === "B") {
+    return "P2";
+  }
+
+  return `P${period}`;
 }
 
 function scaleFromCenter(value: number, center: number, radius: number, domainMax: number) {
@@ -320,7 +337,7 @@ function CompareMovementChart({
       >
         <rect height={tooltip.height} rx="8" width={tooltip.width} />
         <text className="chart-tooltip-title" x="12" y="21">
-          {formatPitchType(pair.pitchType)}
+          {truncateLabel(formatPitchType(pair.pitchType))}
         </text>
         <text x="12" y="43">{periodACompactLabel}: {countLabel(pair.a?.count ?? 0, "pitch")} | HB {formatNumber(pair.a?.horizontalBreak)}</text>
         <text x="12" y="61">{periodBCompactLabel}: {countLabel(pair.b?.count ?? 0, "pitch")} | HB {formatNumber(pair.b?.horizontalBreak)}</text>
@@ -331,7 +348,6 @@ function CompareMovementChart({
               ? "Missing in Period 2"
               : `Shape change ${formatNumber(pair.distance)}"`}
         </text>
-        <text x="12" y="79">Move {formatNumber(pair.distance)}" | IVB {formatNumber(pair.b?.inducedVerticalBreak)}</text>
         <text x="12" y="97">Click to pin</text>
       </g>
     );
@@ -435,7 +451,7 @@ function CompareMovementChart({
           y={y}
         />
         <text className="plot-label compare-movement-inset-title" x={x + 12} y={y + 20}>
-          {formatPitchType(pair.pitchType)} detail
+          {truncateLabel(formatPitchType(pair.pitchType), 15)}
         </text>
         <text className="plot-label compare-movement-inset-scale" x={x + 12} y={y + insetSize - 12}>
           +/-{domain.radius}" window
@@ -449,10 +465,9 @@ function CompareMovementChart({
             }}
             tabIndex={0}
           >
-            <rect height="20" rx="10" width="46" x={x + insetSize - 58} y={y + 6} />
-            <text x={x + insetSize - 35} y={y + 16}>
-              Clear
-            </text>
+            <circle cx={x + insetSize - 18} cy={y + 16} r="10" />
+            <line x1={x + insetSize - 22} x2={x + insetSize - 14} y1={y + 12} y2={y + 20} />
+            <line x1={x + insetSize - 14} x2={x + insetSize - 22} y1={y + 12} y2={y + 20} />
           </g>
         ) : null}
         <line
@@ -515,7 +530,7 @@ function CompareMovementChart({
             title={isCollapsed ? "Expand" : "Collapse"}
             type="button"
           >
-            {isCollapsed ? "+" : "-"}
+            <Icon name={isCollapsed ? "chevronRight" : "chevronDown"} />
           </button>
         </div>
       </div>
@@ -546,7 +561,7 @@ function CompareMovementChart({
                 onClick={() => setChartMode("side_by_side")}
                 type="button"
               >
-                A/B
+                Side by Side
               </button>
             </div>
           </div>
@@ -563,7 +578,7 @@ function CompareMovementChart({
                   className="legend-swatch"
                   style={{ backgroundColor: pitchColor(pair.pitchType) }}
                 />
-                {formatPitchType(pair.pitchType)}
+                <span className="legend-label">{formatPitchType(pair.pitchType)}</span>
               </span>
             ))}
           </div>
@@ -782,7 +797,8 @@ function CompareMovementChart({
             onClick={() => setSelectedPitchType(null)}
             type="button"
           >
-            Clear Selection
+            <Icon name="x" />
+            <span>Clear Selection</span>
           </button>
         </div>
       ) : null}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { PitchResult } from "../api";
 import { formatPitchType } from "../pitchTypes";
 import { countLabel } from "../text";
+import Icon from "./Icon";
 
 type MovementChartProps = {
   pitches: PitchResult[];
@@ -78,6 +79,10 @@ function formatNumber(value: number | null, digits = 1) {
 
 function formatSpin(value: number | null) {
   return value === null ? "-" : `${Math.round(value)} rpm`;
+}
+
+function truncateLabel(value: string, maxLength = 24) {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
 }
 
 function average(values: number[]) {
@@ -194,7 +199,7 @@ function MovementChart({ pitches }: MovementChartProps) {
       >
         <rect height={tooltip.height} rx="8" width={tooltip.width} />
         <text className="chart-tooltip-title" x="12" y="21">
-          {formatPitchType(pitch.pitch_type)}
+          {truncateLabel(formatPitchType(pitch.pitch_type))}
         </text>
         <text x="12" y="45">Velo {formatDetail(pitch.release_speed)} | Spin {formatSpin(pitch.release_spin_rate)}</text>
         <text x="12" y="64">HB {pitch.horizontalBreak.toFixed(1)}" | IVB {pitch.inducedVerticalBreak.toFixed(1)}"</text>
@@ -219,7 +224,7 @@ function MovementChart({ pitches }: MovementChartProps) {
             title={isCollapsed ? "Expand" : "Collapse"}
             type="button"
           >
-            {isCollapsed ? "+" : "-"}
+            <Icon name={isCollapsed ? "chevronRight" : "chevronDown"} />
           </button>
         </div>
       </div>
@@ -237,7 +242,7 @@ function MovementChart({ pitches }: MovementChartProps) {
             title={isExpanded ? "Collapse" : "Expand"}
             type="button"
           >
-            {isExpanded ? "Exit" : "Expand"}
+            <Icon name={isExpanded ? "minimize" : "maximize"} />
           </button>
         </div>
         <div className="strike-zone-toolbar-row strike-zone-toolbar-row--secondary">
@@ -248,7 +253,7 @@ function MovementChart({ pitches }: MovementChartProps) {
                   className="legend-swatch"
                   style={{ backgroundColor: pitchColor(pitchType) }}
                 />
-                {formatPitchType(pitchType)}
+                <span className="legend-label">{formatPitchType(pitchType)}</span>
               </span>
             ))}
           </div>
@@ -428,7 +433,8 @@ function MovementChart({ pitches }: MovementChartProps) {
             onClick={() => setSelectedPitch(null)}
             type="button"
           >
-            Clear Selection
+            <Icon name="x" />
+            <span>Clear Selection</span>
           </button>
         </div>
       ) : null}

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent } from "react";
 import type { HeatmapMode, PitchHeatmapResponse } from "../api";
 import { formatPitchType } from "../pitchTypes";
 import { countLabel } from "../text";
+import Icon from "./Icon";
 
 type PitchHeatmapProps = {
   collapsible?: boolean;
@@ -530,7 +531,7 @@ function PitchHeatmap({
               title={isCollapsed ? "Expand" : "Collapse"}
               type="button"
             >
-              {isCollapsed ? "+" : "-"}
+              <Icon name={isCollapsed ? "chevronRight" : "chevronDown"} />
             </button>
           ) : null}
         </div>
@@ -721,7 +722,8 @@ function PitchHeatmap({
             onClick={() => setSelectionCircle(null)}
             type="button"
           >
-            Clear Selection
+            <Icon name="x" />
+            <span>Clear Selection</span>
           </button>
         </div>
       ) : null}

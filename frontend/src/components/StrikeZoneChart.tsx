@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { PitchResult } from "../api";
 import { formatPitchType } from "../pitchTypes";
 import { countLabel } from "../text";
+import Icon from "./Icon";
 
 type StrikeZoneChartProps = {
   pitches: PitchResult[];
@@ -179,6 +180,10 @@ function formatPitchResult(pitch: PitchResult) {
 
 function formatSpin(value: number | null) {
   return value === null ? "-" : `${Math.round(value)} rpm`;
+}
+
+function truncateLabel(value: string, maxLength = 24) {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
 }
 
 function formatBreak(value: number | null) {
@@ -417,7 +422,9 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
   const [colorMode, setColorMode] = useState<ColorMode>("pitch");
   const [countFilter, setCountFilter] = useState<CountFilter>("all");
   const [batterHand, setBatterHand] = useState<"all" | "L" | "R">("all");
-  const [densityMode, setDensityMode] = useState<DensityMode>("on");
+  const [densityMode, setDensityMode] = useState<DensityMode>(
+    plottedPitches.length > 150 ? "on" : "off",
+  );
   const domain = domainForZoom(zoom);
   const filteredPitches = plottedPitches.filter((pitch) => {
     if (selectedPitchType && pitch.pitch_type !== selectedPitchType) return false;
@@ -447,6 +454,10 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
     setSelectedBucket(null);
     setHoveredBucket(null);
   }, [pitches, selectedPitchType, countFilter, batterHand]);
+
+  useEffect(() => {
+    setDensityMode(plottedPitches.length > 150 ? "on" : "off");
+  }, [pitches]);
 
   useEffect(() => {
     function clearSelection(event: KeyboardEvent) {
@@ -491,7 +502,7 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
       >
         <rect height={tooltip.height} rx="8" width={tooltip.width} />
         <text className="chart-tooltip-title" x="12" y="21">
-          {formatPitchType(pitch.pitch_type)}
+          {truncateLabel(formatPitchType(pitch.pitch_type))}
         </text>
         <text x="12" y="45">Velo {formatDetail(pitch.release_speed)} | Spin {formatSpin(pitch.release_spin_rate)}</text>
         <text x="12" y="64">Count {pitch.balls ?? "-"}-{pitch.strikes ?? "-"} | {formatPitchResult(pitch)}</text>
@@ -517,7 +528,7 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
         </text>
         <text x="12" y="45">{countLabel(summary.count, "pitch")} | {formatRate(summary.share)} share</text>
         <text x="12" y="64">Strike {formatRate(summary.strikeRate)} | Whiff {formatRate(summary.whiffRate)}</text>
-        <text x="12" y="83">Top pitch {formatPitchType(summary.topPitchType)}</text>
+        <text x="12" y="83">Top pitch {truncateLabel(formatPitchType(summary.topPitchType), 18)}</text>
         <text x="12" y="102">Avg EV {formatContactNumber(summary.averageExitVelocity, "mph")}</text>
       </g>
     );
@@ -560,12 +571,26 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
             className="legend-swatch"
             style={{ backgroundColor: pitchColor(pitchType) }}
           />
-          {formatPitchType(pitchType)}
+          <span className="legend-label">{formatPitchType(pitchType)}</span>
         </button>
       ))
     ) : (
       <span className="legend-empty">No pitch types</span>
     );
+  }
+
+  function colorModeLabel() {
+    return colorModes.find((mode) => mode.value === colorMode)?.label ?? "Pitch Type";
+  }
+
+  function countFilterLabel() {
+    return countFilters.find((filter) => filter.value === countFilter)?.label ?? "All Counts";
+  }
+
+  function batterFilterLabel() {
+    if (batterHand === "L") return "vs LHH";
+    if (batterHand === "R") return "vs RHH";
+    return "All Batters";
   }
 
   return (
@@ -586,17 +611,14 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
             title={isCollapsed ? "Expand" : "Collapse"}
             type="button"
           >
-            {isCollapsed ? "+" : "-"}
+            <Icon name={isCollapsed ? "chevronRight" : "chevronDown"} />
           </button>
         </div>
       </div>
 
       <div className="chart-body" hidden={isCollapsed}>
       <div className="strike-zone-toolbar">
-        <div className="strike-zone-toolbar-row">
-          <span className="chart-view-note strike-zone-orientation">
-            Pitcher Left / Pitcher Right
-          </span>
+        <div className="strike-zone-toolbar-row strike-zone-toolbar-row--primary">
           <div className="lens-group">
             <span className="lens-label">Color</span>
             <div className="zoom-controls" aria-label="Strike zone color controls">
@@ -611,60 +633,6 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
                 </button>
               ))}
             </div>
-          </div>
-          <div className="lens-group">
-            <span className="lens-label">Zoom</span>
-            <div className="zoom-controls" aria-label="Strike zone zoom controls">
-              {zoomLevels.map((level) => (
-                <button
-                  className={zoom === level ? "zoom-button is-active" : "zoom-button"}
-                  key={level}
-                  onClick={() => setZoom(level)}
-                  type="button"
-                >
-                  {level}x
-                </button>
-              ))}
-            </div>
-          </div>
-          <button
-            className={densityMode === "on" ? "secondary-button is-active" : "secondary-button"}
-            onClick={() => setDensityMode((current) => (current === "on" ? "off" : "on"))}
-            type="button"
-          >
-            Density
-          </button>
-          <button
-            aria-label="Reset strike zone lens"
-            className="secondary-button compact-action-button"
-            onClick={() => {
-              setSelectedPitchType(null);
-              setCountFilter("all");
-              setBatterHand("all");
-              setColorMode("pitch");
-              setDensityMode("on");
-              setSelectedPitch(null);
-              setSelectedBucket(null);
-            }}
-            title="Reset lens"
-            type="button"
-          >
-            Reset
-          </button>
-          <button
-            aria-label={isExpanded ? "Collapse expanded strike zone chart" : "Expand strike zone chart"}
-            className="secondary-button compact-action-button"
-            onClick={() => setIsExpanded((current) => !current)}
-            title={isExpanded ? "Collapse" : "Expand"}
-            type="button"
-          >
-            {isExpanded ? "Exit" : "Expand"}
-          </button>
-        </div>
-
-        <div className="strike-zone-toolbar-row strike-zone-toolbar-row--secondary">
-          <div className="pitch-legend strike-zone-legend" aria-label="Color legend">
-            {renderLegend()}
           </div>
           <div className="lens-group">
             <span className="lens-label">Count</span>
@@ -695,6 +663,71 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
                 </button>
               ))}
             </div>
+          </div>
+        </div>
+
+        <div className="strike-zone-toolbar-row strike-zone-toolbar-row--summary">
+          <span className="chart-view-note strike-zone-orientation">
+            Pitcher Left / Pitcher Right
+          </span>
+          <span className="strike-zone-state-summary">
+            Colored by {colorModeLabel()} | {countFilterLabel()} | {batterFilterLabel()}
+          </span>
+        </div>
+
+        <div className="strike-zone-toolbar-row strike-zone-toolbar-row--secondary">
+          <div className="pitch-legend strike-zone-legend" aria-label="Color legend">
+            {renderLegend()}
+          </div>
+          <div className="strike-zone-actions" aria-label="Strike zone chart actions">
+          <div className="lens-group">
+            <span className="lens-label">Zoom</span>
+            <div className="zoom-controls" aria-label="Strike zone zoom controls">
+              {zoomLevels.map((level) => (
+                <button
+                  className={zoom === level ? "zoom-button is-active" : "zoom-button"}
+                  key={level}
+                  onClick={() => setZoom(level)}
+                  type="button"
+                >
+                  {level}x
+                </button>
+              ))}
+            </div>
+          </div>
+          <button
+            className={densityMode === "on" ? "secondary-button compact-action-button is-active" : "secondary-button compact-action-button"}
+            onClick={() => setDensityMode((current) => (current === "on" ? "off" : "on"))}
+            type="button"
+          >
+            Density
+          </button>
+          <button
+            aria-label="Reset strike zone lens"
+            className="secondary-button compact-action-button"
+            onClick={() => {
+              setSelectedPitchType(null);
+              setCountFilter("all");
+              setBatterHand("all");
+              setColorMode("pitch");
+              setDensityMode(plottedPitches.length > 150 ? "on" : "off");
+              setSelectedPitch(null);
+              setSelectedBucket(null);
+            }}
+            title="Reset lens"
+            type="button"
+          >
+            <Icon name="reset" />
+          </button>
+          <button
+            aria-label={isExpanded ? "Collapse expanded strike zone chart" : "Expand strike zone chart"}
+            className="secondary-button compact-action-button"
+            onClick={() => setIsExpanded((current) => !current)}
+            title={isExpanded ? "Collapse" : "Expand"}
+            type="button"
+          >
+            <Icon name={isExpanded ? "minimize" : "maximize"} />
+          </button>
           </div>
         </div>
       </div>
@@ -860,7 +893,8 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
             onClick={() => setSelectedBucket(null)}
             type="button"
           >
-            Clear Zone
+            <Icon name="x" />
+            <span>Clear Zone</span>
           </button>
         </div>
       ) : null}
@@ -938,7 +972,8 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
             onClick={() => setSelectedPitch(null)}
             type="button"
           >
-            Clear Selection
+            <Icon name="x" />
+            <span>Clear Selection</span>
           </button>
         </div>
       ) : null}

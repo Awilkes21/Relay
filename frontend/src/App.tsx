@@ -30,6 +30,7 @@ import PitchHeatmap from "./components/PitchHeatmap";
 import StrikeZoneChart from "./components/StrikeZoneChart";
 import CompareMovementChart from "./components/CompareMovementChart";
 import CompareDeltaHeatmap from "./components/CompareDeltaHeatmap";
+import Icon from "./components/Icon";
 import { formatPitchType, formatPitchTypeWithCode } from "./pitchTypes";
 import { countLabel } from "./text";
 import "./App.css";
@@ -53,6 +54,11 @@ type QueryFocusTarget = {
   target: string;
   nonce: number;
 };
+type NoResultsDiagnostic = {
+  label: string;
+  status: "ok" | "warning" | "fail" | "unknown";
+  detail: string;
+};
 type ExplorerAnswerSnapshot = {
   filters: PitchFilters;
   results: PitchResult[];
@@ -62,6 +68,7 @@ type ExplorerAnswerSnapshot = {
   heatmapMode: HeatmapMode;
   dataQualityMetrics: DataQualityMetric[];
   dataQualityPitchCount: number;
+  noResultsDiagnostics: NoResultsDiagnostic[];
 };
 
 type CompareAnswerSnapshot = {
@@ -362,6 +369,96 @@ function formatQualityRate(value: number | null | undefined) {
   return `${percent.toFixed(0)}%`;
 }
 
+function dataQualityMetric(metrics: DataQualityMetric[], key: string) {
+  return metrics.find((metric) => metric.key === key);
+}
+
+function armAngleQualityMessage(metrics: DataQualityMetric[]) {
+  const armAngle = dataQualityMetric(metrics, "arm_angle");
+  if (!armAngle || armAngle.denominator_count === 0 || armAngle.missing_count === 0) return null;
+  if ((armAngle.available_rate ?? 1) >= 0.95 && armAngle.missing_count < 10) return null;
+
+  return `Arm angle is available for ${armAngle.available_count} of ${countLabel(
+    armAngle.denominator_count,
+    "matching pitch",
+  )}; arm-slot references may be incomplete.`;
+}
+
+function battedBallQualityMessage(metrics: DataQualityMetric[]) {
+  const battedBall = dataQualityMetric(metrics, "batted_ball");
+  if (!battedBall) return null;
+  if (battedBall.denominator_count === 0) {
+    return "No balls in play matched these filters, so batted-ball metrics are unavailable.";
+  }
+  if ((battedBall.available_rate ?? 1) >= 0.9 && battedBall.denominator_count >= 20) return null;
+
+  return `Batted-ball metrics are based on ${battedBall.available_count} of ${countLabel(
+    battedBall.denominator_count,
+    "ball in play",
+  )} for these filters.`;
+}
+
+function contextualQualityNote(message: string | null) {
+  return message ? <div className="contextual-quality-note">{message}</div> : null;
+}
+
+function NoResultsDiagnostics({ diagnostics }: { diagnostics: NoResultsDiagnostic[] }) {
+  if (diagnostics.length === 0) return null;
+
+  const statusLabels = {
+    ok: "Yes",
+    warning: "Maybe",
+    fail: "No",
+    unknown: "Check",
+  };
+
+  return (
+    <div className="no-results-diagnostics">
+      <div className="no-results-diagnostics-heading">Why no results?</div>
+      <div className="no-results-diagnostics-grid">
+        {diagnostics.map((diagnostic) => (
+          <div
+            className={`diagnostic-item diagnostic-item--${diagnostic.status}`}
+            key={diagnostic.label}
+          >
+            <span>{diagnostic.label}</span>
+            <strong>{statusLabels[diagnostic.status]}</strong>
+            <small>{diagnostic.detail}</small>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const pitchTypeGroups: Record<string, string[]> = {
+  fastball: ["FF", "SI", "FC"],
+  breaking: ["SL", "CU", "KC", "ST", "SV"],
+  offspeed: ["CH", "FS", "FO", "SC", "EP"],
+};
+
+function splitPitchTypes(value: PitchFilters["pitch_type"]) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  return String(value ?? "")
+    .split(",")
+    .map((pitchType) => pitchType.trim())
+    .filter(Boolean);
+}
+
+function isDateWithinRange(dateValue: string, startValue?: string, endValue?: string) {
+  const date = new Date(`${dateValue}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return false;
+  if (startValue) {
+    const start = new Date(`${startValue}T00:00:00`);
+    if (!Number.isNaN(start.getTime()) && date < start) return false;
+  }
+  if (endValue) {
+    const end = new Date(`${endValue}T00:00:00`);
+    if (!Number.isNaN(end.getTime()) && date > end) return false;
+  }
+  return true;
+}
+
 function formatDelta(value: number | null | undefined, kind: "rate" | "number") {
   if (value === null || value === undefined) return "-";
   const sign = value > 0 ? "+" : "";
@@ -614,6 +711,7 @@ function App() {
   const [heatmapMode, setHeatmapMode] = useState<HeatmapMode>("all");
   const [resultDataQualityMetrics, setResultDataQualityMetrics] = useState<DataQualityMetric[]>([]);
   const [dataQualityPitchCount, setDataQualityPitchCount] = useState(0);
+  const [noResultsDiagnostics, setNoResultsDiagnostics] = useState<NoResultsDiagnostic[]>([]);
   const [lastPitchSearchFilters, setLastPitchSearchFilters] = useState<PitchFilters | null>(null);
   const [isHeatmapLoading, setIsHeatmapLoading] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -864,6 +962,96 @@ function App() {
 
   function resolvableComparePitcher() {
     return selectedComparePitcher() ?? bestPitcherNameMatch(compareFilters.pitcher_name);
+  }
+
+  function buildNoResultsDiagnostics(
+    searchFilters: PitchFilters,
+    options: PitchFilterOptions,
+    pitcher: CachedPitcher | undefined,
+  ): NoResultsDiagnostic[] {
+    const diagnostics: NoResultsDiagnostic[] = [];
+
+    diagnostics.push({
+      label: "Pitcher found",
+      status: pitcher ? "ok" : "fail",
+      detail: pitcher
+        ? formatPersonName(pitcher.player_name)
+        : "Relay could not match this to a cached pitcher.",
+    });
+
+    if (pitcher && (searchFilters.single_game || searchFilters.start_date || searchFilters.end_date || searchFilters.season)) {
+      const availableDates = options.game_dates.map((game) => game.game_date).filter(Boolean);
+      const hasDateMatch = searchFilters.single_game
+        ? availableDates.includes(searchFilters.single_game)
+        : availableDates.some((gameDate) =>
+            isDateWithinRange(gameDate, searchFilters.start_date, searchFilters.end_date),
+          );
+      diagnostics.push({
+        label: "Date range available",
+        status: hasDateMatch ? "ok" : "fail",
+        detail: hasDateMatch
+          ? "Cached data overlaps the requested date scope."
+          : "No cached games matched that date scope with the other filters.",
+      });
+    }
+
+    const requestedPitchTypes = splitPitchTypes(searchFilters.pitch_type);
+    const requestedGroupTypes = searchFilters.pitch_type_group
+      ? pitchTypeGroups[searchFilters.pitch_type_group] ?? []
+      : [];
+    const pitchTypesToCheck = requestedPitchTypes.length ? requestedPitchTypes : requestedGroupTypes;
+    if (pitchTypesToCheck.length > 0) {
+      const missingPitchTypes = pitchTypesToCheck.filter((pitchType) => !options.pitch_types.includes(pitchType));
+      diagnostics.push({
+        label: "Pitch type exists",
+        status: missingPitchTypes.length === 0 ? "ok" : "fail",
+        detail:
+          missingPitchTypes.length === 0
+            ? "This pitcher has matching pitch types in the cached data."
+            : `${missingPitchTypes.map(formatPitchTypeWithCode).join(", ")} did not appear with the other filters.`,
+      });
+    }
+
+    if (searchFilters.batter_hand) {
+      const hasBatterSide = options.batter_hands.includes(searchFilters.batter_hand);
+      diagnostics.push({
+        label: "Batter side has pitches",
+        status: hasBatterSide ? "ok" : "fail",
+        detail: hasBatterSide
+          ? `There are cached pitches vs ${searchFilters.batter_hand === "L" ? "left-handed" : "right-handed"} hitters.`
+          : `No cached pitches matched vs ${searchFilters.batter_hand === "L" ? "left-handed" : "right-handed"} hitters with the other filters.`,
+      });
+    }
+
+    const minVelocity = searchFilters.min_velocity ? Number(searchFilters.min_velocity) : null;
+    const maxVelocity = searchFilters.max_velocity ? Number(searchFilters.max_velocity) : null;
+    if (
+      (minVelocity !== null && !Number.isNaN(minVelocity)) ||
+      (maxVelocity !== null && !Number.isNaN(maxVelocity))
+    ) {
+      const availableMin = options.velocity.min;
+      const availableMax = options.velocity.max;
+      const tooHigh = minVelocity !== null && availableMax !== null && minVelocity > availableMax;
+      const tooLow = maxVelocity !== null && availableMin !== null && maxVelocity < availableMin;
+      diagnostics.push({
+        label: "Velocity filter",
+        status: tooHigh || tooLow ? "warning" : "ok",
+        detail:
+          tooHigh || tooLow
+            ? `Requested velocity is outside the available range (${formatNumber(availableMin)}-${formatNumber(availableMax)} mph).`
+            : `Available velocity range is ${formatNumber(availableMin)}-${formatNumber(availableMax)} mph before the velocity filter.`,
+      });
+    }
+
+    if (diagnostics.length === 1 && pitcher) {
+      diagnostics.push({
+        label: "Likely cause",
+        status: "unknown",
+        detail: "The combination of filters may be too narrow. Try removing one condition at a time.",
+      });
+    }
+
+    return diagnostics;
   }
 
   function compareCachedDates() {
@@ -1533,6 +1721,15 @@ function App() {
       setResultDataQualityMetrics(dataQualityResponse.metrics);
       setDataQualityPitchCount(dataQualityResponse.pitch_count);
       setLastPitchSearchFilters(queryFilters);
+      const diagnostics =
+        response.total_count === 0
+          ? buildNoResultsDiagnostics(
+              queryFilters,
+              await getPitchFilterOptions(queryFilters),
+              pitcher,
+            )
+          : [];
+      setNoResultsDiagnostics(diagnostics);
       setAskNotice(null);
       return {
         filters: queryFilters,
@@ -1543,6 +1740,7 @@ function App() {
         heatmapMode: mode,
         dataQualityMetrics: dataQualityResponse.metrics,
         dataQualityPitchCount: dataQualityResponse.pitch_count,
+        noResultsDiagnostics: diagnostics,
       };
     } catch (error) {
       setResults([]);
@@ -1551,6 +1749,7 @@ function App() {
       setHeatmap(null);
       setResultDataQualityMetrics([]);
       setDataQualityPitchCount(0);
+      setNoResultsDiagnostics([]);
       setLastPitchSearchFilters(null);
       setSearchError(error instanceof Error ? error.message : "Search failed");
       return null;
@@ -1731,6 +1930,7 @@ function App() {
     setTotalResultCount(0);
     setHeatmap(null);
     setLastPitchSearchFilters(null);
+    setNoResultsDiagnostics([]);
     setHeatmapMode(nextHeatmapMode);
 
     setSearchError(null);
@@ -1973,6 +2173,7 @@ function App() {
     setHeatmap(null);
     setResultDataQualityMetrics([]);
     setDataQualityPitchCount(0);
+    setNoResultsDiagnostics([]);
     setLastPitchSearchFilters(null);
     setSearchError(null);
   }
@@ -2120,12 +2321,13 @@ function App() {
     return (
       <th aria-sort={isActive ? (pitchSort.direction === "asc" ? "ascending" : "descending") : "none"}>
         <button
+          aria-label={`Sort by ${label}`}
           className={isActive ? "table-sort-button is-active" : "table-sort-button"}
           onClick={() => updatePitchSort(key)}
+          title={`Sort by ${label}`}
           type="button"
         >
           <span>{label}</span>
-          <span aria-hidden="true">{isActive ? (pitchSort.direction === "asc" ? "Asc" : "Desc") : "Sort"}</span>
         </button>
       </th>
     );
@@ -2371,6 +2573,7 @@ function App() {
       setHeatmapMode(answer.explorer.heatmapMode);
       setResultDataQualityMetrics(answer.explorer.dataQualityMetrics);
       setDataQualityPitchCount(answer.explorer.dataQualityPitchCount);
+      setNoResultsDiagnostics(answer.explorer.noResultsDiagnostics);
       setLastPitchSearchFilters(answer.explorer.filters);
       setLastAppliedQuery(answer.query);
       setExplorerFocus({ target: answer.target, nonce: Date.now() });
@@ -2395,24 +2598,94 @@ function App() {
     const snapshot = answer.explorer;
     if (!snapshot) return null;
 
+    const emptyFocusedNotice = (
+      <div className="focused-empty-notice">
+        No pitches matched this query. Try removing or modifying some filters.
+      </div>
+    );
+    const diagnostics = <NoResultsDiagnostics diagnostics={snapshot.noResultsDiagnostics} />;
+
     if (snapshot.results.length === 0) {
+      if (answer.target === "heatmap") {
+        return (
+          <>
+            {emptyFocusedNotice}
+            {diagnostics}
+            {snapshot.heatmapMode === "hard_contact"
+              ? contextualQualityNote(battedBallQualityMessage(snapshot.dataQualityMetrics))
+              : null}
+            <PitchHeatmap
+              heatmap={snapshot.heatmap}
+              mode={snapshot.heatmapMode}
+              isLoading={Boolean(homeHeatmapLoading[answer.id])}
+              onModeChange={(mode) => updateHomeExplorerHeatmap(answer, mode)}
+              collapsible={false}
+            />
+          </>
+        );
+      }
+
+      if (answer.target === "strike_zone") {
+        return (
+          <>
+            {emptyFocusedNotice}
+            {diagnostics}
+            <StrikeZoneChart pitches={snapshot.results} />
+          </>
+        );
+      }
+
+      if (answer.target === "movement") {
+        return (
+          <>
+            {emptyFocusedNotice}
+            {diagnostics}
+            {contextualQualityNote(armAngleQualityMessage(snapshot.dataQualityMetrics))}
+            <MovementChart pitches={snapshot.results} />
+          </>
+        );
+      }
+
+      if (answer.target === "table") {
+        return (
+          <>
+            {emptyFocusedNotice}
+            {diagnostics}
+            {contextualQualityNote(battedBallQualityMessage(snapshot.dataQualityMetrics))}
+            <div className="table-wrap">
+              <div className="empty-state">
+                <p>No pitch rows to show.</p>
+              </div>
+            </div>
+          </>
+        );
+      }
+
       return (
-        <div className="empty-state">
-          <p>No pitches matched this query. Try removing or modifying some filters.</p>
-        </div>
+        <>
+          <div className="empty-state">
+            <p>No pitches matched this query. Try removing or modifying some filters.</p>
+          </div>
+          {diagnostics}
+        </>
       );
     }
 
     if (answer.target === "heatmap") {
       return (
-        <PitchHeatmap
-          heatmap={snapshot.heatmap}
-          mode={snapshot.heatmapMode}
-          isLoading={Boolean(homeHeatmapLoading[answer.id])}
-          onModeChange={(mode) => updateHomeExplorerHeatmap(answer, mode)}
-          pitcherHand={snapshot.results.find((pitch) => pitch.p_throws)?.p_throws}
-          collapsible={false}
-        />
+        <>
+          {snapshot.heatmapMode === "hard_contact"
+            ? contextualQualityNote(battedBallQualityMessage(snapshot.dataQualityMetrics))
+            : null}
+          <PitchHeatmap
+            heatmap={snapshot.heatmap}
+            mode={snapshot.heatmapMode}
+            isLoading={Boolean(homeHeatmapLoading[answer.id])}
+            onModeChange={(mode) => updateHomeExplorerHeatmap(answer, mode)}
+            pitcherHand={snapshot.results.find((pitch) => pitch.p_throws)?.p_throws}
+            collapsible={false}
+          />
+        </>
       );
     }
 
@@ -2421,7 +2694,12 @@ function App() {
     }
 
     if (answer.target === "movement") {
-      return <MovementChart pitches={snapshot.results} />;
+      return (
+        <>
+          {contextualQualityNote(armAngleQualityMessage(snapshot.dataQualityMetrics))}
+          <MovementChart pitches={snapshot.results} />
+        </>
+      );
     }
 
     if (answer.target === "data_quality") {
@@ -2455,38 +2733,41 @@ function App() {
 
     if (answer.target === "table") {
       return (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Pitcher</th>
-                <th>Batter</th>
-                <th>Type</th>
-                <th>Velocity (mph)</th>
-                <th>Spin (rpm)</th>
-                <th>Count</th>
-                <th>Description</th>
-                <th>Events</th>
-              </tr>
-            </thead>
-            <tbody>
-              {snapshot.results.slice(0, 50).map((pitch, index) => (
-                <tr key={`${answer.id}-${pitch.game_date}-${index}`}>
-                  <td>{formatDate(pitch.game_date)}</td>
-                  <td>{formatPersonName(pitch.player_name)}</td>
-                  <td>{formatBatter(pitch)}</td>
-                  <td>{formatPitchType(pitch.pitch_type)}</td>
-                  <td>{formatNumber(pitch.release_speed)}</td>
-                  <td>{formatNumber(pitch.release_spin_rate, 0)}</td>
-                  <td>{pitch.balls ?? ""}-{pitch.strikes ?? ""}</td>
-                  <td>{formatDescription(pitch.description)}</td>
-                  <td>{formatEvent(pitch.events)}</td>
+        <>
+          {contextualQualityNote(battedBallQualityMessage(snapshot.dataQualityMetrics))}
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Pitcher</th>
+                  <th>Batter</th>
+                  <th>Type</th>
+                  <th>Velocity (mph)</th>
+                  <th>Spin (rpm)</th>
+                  <th>Count</th>
+                  <th>Description</th>
+                  <th>Events</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {snapshot.results.slice(0, 50).map((pitch, index) => (
+                  <tr key={`${answer.id}-${pitch.game_date}-${index}`}>
+                    <td>{formatDate(pitch.game_date)}</td>
+                    <td>{formatPersonName(pitch.player_name)}</td>
+                    <td>{formatBatter(pitch)}</td>
+                    <td>{formatPitchType(pitch.pitch_type)}</td>
+                    <td>{formatNumber(pitch.release_speed)}</td>
+                    <td>{formatNumber(pitch.release_spin_rate, 0)}</td>
+                    <td>{pitch.balls ?? ""}-{pitch.strikes ?? ""}</td>
+                    <td>{formatDescription(pitch.description)}</td>
+                    <td>{formatEvent(pitch.events)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       );
     }
 
@@ -2627,7 +2908,7 @@ function App() {
             title={theme === "dark" ? "Light mode" : "Dark mode"}
             type="button"
           >
-            {theme === "dark" ? "Light" : "Dark"}
+            <Icon name={theme === "dark" ? "sun" : "moon"} />
           </button>
           <div className={`status-pill status-pill--${backendStatus}`}>
             <span className="status-dot" />
@@ -2744,7 +3025,7 @@ function App() {
                       title={isCollapsed ? "Expand" : "Collapse"}
                       type="button"
                     >
-                      {isCollapsed ? "+" : "-"}
+                      <Icon name={isCollapsed ? "chevronRight" : "chevronDown"} />
                     </button>
                     <div>
                       <span>Showing</span>
@@ -2803,6 +3084,7 @@ function App() {
           API_URL,
           pitcherError,
           pitchOptionsError,
+          filters,
           selectedExplorerPitcher,
           formatDate,
           formatPersonName,
@@ -2838,6 +3120,7 @@ function App() {
           formatEvent,
           dataQualityMetrics: resultDataQualityMetrics,
           dataQualityPitchCount,
+          noResultsDiagnostics,
           explorerFocus,
           lastAppliedQuery: activeView === "explorer" ? lastAppliedQuery : "",
           focusedResultTarget: ""

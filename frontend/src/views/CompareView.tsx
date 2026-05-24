@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import CompareDeltaHeatmap from "../components/CompareDeltaHeatmap";
 import CompareMovementChart from "../components/CompareMovementChart";
 import PitchHeatmap from "../components/PitchHeatmap";
+import Icon from "../components/Icon";
 import { formatPitchType, formatPitchTypeWithCode } from "../pitchTypes";
 import { countLabel } from "../text";
 
@@ -149,11 +150,82 @@ function CompareView({ hidden, context }: CompareViewProps) {
   }
 
   function disclosureIcon(isCollapsed: boolean) {
-    return isCollapsed ? "+" : "-";
+    return <Icon name={isCollapsed ? "chevronRight" : "chevronDown"} />;
   }
 
   function shouldShowResult(targets: string[]) {
     return !isFocusedResult || targets.includes(focusedResultTarget);
+  }
+
+  function compareArmAngleQualityNote() {
+    if (!comparison) return null;
+
+    const period1Missing = comparison.period_a.metrics.arm_angle === null;
+    const period2Missing = comparison.period_b.metrics.arm_angle === null;
+    if (!period1Missing && !period2Missing) return null;
+
+    const missingPeriods = [
+      period1Missing ? "Period 1" : null,
+      period2Missing ? "Period 2" : null,
+    ].filter(Boolean);
+
+    return (
+      <div className="contextual-quality-note">
+        Arm angle is unavailable for {missingPeriods.join(" and ")}, so arm-slot references may be incomplete.
+      </div>
+    );
+  }
+
+  function batterSideLabel(value: string) {
+    if (value === "L") return "vs LHH";
+    if (value === "R") return "vs RHH";
+    return "vs both sides";
+  }
+
+  function comparePitchScopeLabel() {
+    const selectedTypes = compareFilters.pitch_type
+      .split(",")
+      .map((pitchType: string) => pitchType.trim())
+      .filter(Boolean);
+
+    if (selectedTypes.length === 0) return "All pitches";
+    return selectedTypes.map((pitchType: string) => formatPitchTypeWithCode(pitchType)).join(", ");
+  }
+
+  function compareTimeSummary() {
+    if (!comparison) return "No comparison loaded";
+
+    const periodAStart = comparison.period_a.start;
+    const periodAEnd = comparison.period_a.end;
+    const periodBStart = comparison.period_b.start;
+    const periodBEnd = comparison.period_b.end;
+    const periodASeason =
+      periodAStart && periodAEnd && periodAStart.slice(0, 4) === periodAEnd.slice(0, 4)
+        ? periodAStart.slice(0, 4)
+        : null;
+    const periodBSeason =
+      periodBStart && periodBEnd && periodBStart.slice(0, 4) === periodBEnd.slice(0, 4)
+        ? periodBStart.slice(0, 4)
+        : null;
+
+    if (periodASeason && periodBSeason && periodASeason !== periodBSeason) {
+      const bLooksPartial =
+        compareDateRange?.last_game_date &&
+        periodBEnd === compareDateRange.last_game_date &&
+        periodBEnd.slice(0, 4) === periodBSeason;
+      return `${periodASeason} vs ${periodBSeason}${bLooksPartial ? " so far" : ""}`;
+    }
+
+    return `${formatShortDateRange(periodAStart, periodAEnd)} vs ${formatShortDateRange(periodBStart, periodBEnd)}`;
+  }
+
+  function collapsedCompareSummary() {
+    return [
+      searchFiltersPitcherName(compareFilters),
+      compareTimeSummary(),
+      comparePitchScopeLabel(),
+      batterSideLabel(compareFilters.batter_hand),
+    ].join(" | ");
   }
 
   function paddedPitchSamples(pitches: any[]) {
@@ -212,6 +284,85 @@ function CompareView({ hidden, context }: CompareViewProps) {
     return largest ? `${formatPitchType(largest[0])} ${formatDeltaWithUnit(largest[1], "number", unit, digits)}` : "-";
   }
 
+  function formatPointChange(value: number) {
+    return `${value > 0 ? "+" : ""}${(value * 100).toFixed(1)} pts`;
+  }
+
+  function directionPhrase(value: number, positive: string, negative: string) {
+    return value >= 0 ? positive : negative;
+  }
+
+  function topPitchTypeDelta(values: Record<string, number | null | undefined>) {
+    return Object.entries(values)
+      .filter((entry): entry is [string, number] => entry[1] !== null && entry[1] !== undefined)
+      .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0] ?? null;
+  }
+
+  function comparisonInsightItems() {
+    if (!comparison) return [];
+
+    const insights: string[] = [];
+    const usageRates: Record<string, number | null | undefined> = {};
+    Object.entries(comparison.deltas.pitch_usage as Record<string, { rate: number | null | undefined }>).forEach(([pitchType, metric]) => {
+      usageRates[pitchType] = metric.rate;
+    });
+    const usageDelta = topPitchTypeDelta(usageRates);
+
+    if (usageDelta && Math.abs(usageDelta[1]) >= 0.005) {
+      insights.push(
+        `Period 2 used ${formatPitchType(usageDelta[0])} ${directionPhrase(
+          usageDelta[1],
+          "more often",
+          "less often",
+        )} (${formatPointChange(usageDelta[1])}).`,
+      );
+    }
+
+    if (comparison.deltas.zone_rate !== null && Math.abs(comparison.deltas.zone_rate) >= 0.005) {
+      insights.push(
+        `Zone rate ${directionPhrase(comparison.deltas.zone_rate, "increased", "fell")} (${formatPointChange(
+          comparison.deltas.zone_rate,
+        )}).`,
+      );
+    }
+
+    if (comparison.deltas.whiff_rate !== null && Math.abs(comparison.deltas.whiff_rate) >= 0.005) {
+      insights.push(
+        `Whiff rate ${directionPhrase(comparison.deltas.whiff_rate, "improved", "dropped")} (${formatPointChange(
+          comparison.deltas.whiff_rate,
+        )}).`,
+      );
+    }
+
+    const velocityDelta = topPitchTypeDelta(comparison.deltas.average_velocity);
+    if (velocityDelta && Math.abs(velocityDelta[1]) >= 0.3) {
+      insights.push(
+        `${formatPitchType(velocityDelta[0])} velocity ${directionPhrase(
+          velocityDelta[1],
+          "rose",
+          "fell",
+        )} ${Math.abs(velocityDelta[1]).toFixed(1)} mph.`,
+      );
+    }
+
+    const spinDelta = topPitchTypeDelta(comparison.deltas.average_spin_rate);
+    if (spinDelta && Math.abs(spinDelta[1]) >= 50) {
+      insights.push(
+        `${formatPitchType(spinDelta[0])} spin ${directionPhrase(
+          spinDelta[1],
+          "rose",
+          "fell",
+        )} ${Math.abs(spinDelta[1]).toFixed(0)} rpm.`,
+      );
+    }
+
+    if (insights.length === 0) {
+      return ["No major usage, command, whiff, velocity, or spin changes crossed the current summary thresholds."];
+    }
+
+    return insights.slice(0, 3);
+  }
+
   return (
       <section
         className="page-section"
@@ -232,12 +383,8 @@ function CompareView({ hidden, context }: CompareViewProps) {
           {comparison && !isFocusedResult ? (
             <div className="collapsed-search-bar">
               <div>
-                <span>Comparison Setup</span>
-                <strong>
-                  {searchFiltersPitcherName(compareFilters)} |{" "}
-                  {formatShortDateRange(comparison.period_a.start, comparison.period_a.end)} vs{" "}
-                  {formatShortDateRange(comparison.period_b.start, comparison.period_b.end)}
-                </strong>
+              <span>Comparison Setup</span>
+                <strong>{collapsedCompareSummary()}</strong>
               </div>
               <button
                 className="secondary-button"
@@ -479,7 +626,12 @@ function CompareView({ hidden, context }: CompareViewProps) {
                     type="button"
                     onClick={() => removeCompareFilter(filter.name)}
                   >
-                    {filter.label}: {filter.value} Clear
+                    <span>
+                      {filter.label}: {filter.value}
+                    </span>
+                    <strong aria-hidden="true" className="filter-chip-remove">
+                      ×
+                    </strong>
                   </button>
                 ))}
               </div>
@@ -520,28 +672,6 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   />
                   <button className="secondary-button" onClick={saveCurrentComparison} type="button">
                     Save
-                  </button>
-                  <button
-                    className="secondary-button"
-                    onClick={() =>
-                      downloadCsv(
-                        "relay-comparison.csv",
-                        visiblePitchTypes.map((pitchType) => ({
-                          pitch_type: pitchType,
-                          a_usage: comparison.period_a.metrics.pitch_usage[pitchType]?.rate,
-                          b_usage: comparison.period_b.metrics.pitch_usage[pitchType]?.rate,
-                          usage_delta: comparison.deltas.pitch_usage[pitchType]?.rate,
-                          velocity_delta: comparison.deltas.average_velocity[pitchType],
-                          spin_delta: comparison.deltas.average_spin_rate[pitchType],
-                          ivb_delta: comparison.deltas.average_induced_vertical_break[pitchType],
-                          hb_delta: comparison.deltas.average_horizontal_break[pitchType],
-                          arm_angle_delta: comparison.deltas.average_arm_angle[pitchType],
-                        })),
-                      )
-                    }
-                    type="button"
-                  >
-                    Export CSV
                   </button>
                 </div>
               </div>
@@ -626,6 +756,17 @@ function CompareView({ hidden, context }: CompareViewProps) {
               </div>
               ) : null}
               {shouldShowResult(["summary"]) ? (
+              <section className="comparison-insight-card">
+                <span>What changed?</span>
+                <ul>
+                  {comparisonInsightItems().map((insight) => (
+                    <li key={insight}>{insight}</li>
+                  ))}
+                </ul>
+              </section>
+              ) : null}
+
+              {shouldShowResult(["summary"]) ? (
               <div className="comparison-summary focus-scroll-target" id="relay-compare-summary">
                 <div className="metric-card">
                   <span>Usage Delta</span>
@@ -672,6 +813,7 @@ function CompareView({ hidden, context }: CompareViewProps) {
 
               {shouldShowResult(["movement", "movement_diff"]) ? (
               <div className="focus-scroll-target" id="relay-compare-movement">
+                {compareArmAngleQualityNote()}
                 <CompareMovementChart
                   comparison={comparison}
                   visiblePitchTypes={visiblePitchTypes}
@@ -926,6 +1068,28 @@ function CompareView({ hidden, context }: CompareViewProps) {
                 <h3>Pitch Type Changes</h3>
                 <div className="results-header-actions">
                   <button
+                    className="secondary-button compact-action-button"
+                    onClick={() =>
+                      downloadCsv(
+                        "relay-comparison.csv",
+                        visiblePitchTypes.map((pitchType) => ({
+                          pitch_type: pitchType,
+                          period_1_usage: comparison.period_a.metrics.pitch_usage[pitchType]?.rate,
+                          period_2_usage: comparison.period_b.metrics.pitch_usage[pitchType]?.rate,
+                          period_2_minus_period_1_usage_delta: comparison.deltas.pitch_usage[pitchType]?.rate,
+                          period_2_minus_period_1_velocity_delta: comparison.deltas.average_velocity[pitchType],
+                          period_2_minus_period_1_spin_delta: comparison.deltas.average_spin_rate[pitchType],
+                          period_2_minus_period_1_ivb_delta: comparison.deltas.average_induced_vertical_break[pitchType],
+                          period_2_minus_period_1_hb_delta: comparison.deltas.average_horizontal_break[pitchType],
+                          period_2_minus_period_1_arm_angle_delta: comparison.deltas.average_arm_angle[pitchType],
+                        })),
+                      )
+                    }
+                    type="button"
+                  >
+                    Export CSV
+                  </button>
+                  <button
                     aria-label={collapsedSections.diffTable ? "Expand pitch-type diff table" : "Collapse pitch-type diff table"}
                     className="disclosure-button"
                     onClick={() => toggleSection("diffTable")}
@@ -944,16 +1108,16 @@ function CompareView({ hidden, context }: CompareViewProps) {
                     <tr>
                       <th>Pitch</th>
                       <th>Status</th>
-                      <th>A Usage</th>
-                      <th>B Usage</th>
-                      <th>Usage Delta</th>
-                      <th>A Velo (mph)</th>
-                      <th>B Velo (mph)</th>
-                      <th>Velo Delta (mph)</th>
-                      <th>Spin Delta (rpm)</th>
-                      <th>IVB Delta (in)</th>
-                      <th>HB Delta (in)</th>
-                      <th>Arm Delta (deg)</th>
+                      <th>Period 1 Usage</th>
+                      <th>Period 2 Usage</th>
+                      <th>Period 2 minus Period 1 Usage</th>
+                      <th>Period 1 Velo (mph)</th>
+                      <th>Period 2 Velo (mph)</th>
+                      <th>Period 2 minus Period 1 Velo (mph)</th>
+                      <th>Period 2 minus Period 1 Spin (rpm)</th>
+                      <th>Period 2 minus Period 1 IVB (in)</th>
+                      <th>Period 2 minus Period 1 HB (in)</th>
+                      <th>Period 2 minus Period 1 Arm (deg)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1095,7 +1259,8 @@ function CompareView({ hidden, context }: CompareViewProps) {
                       }}
                       type="button"
                     >
-                      Clear Selection
+                      <Icon name="x" />
+                      <span>Clear Selection</span>
                     </button>
                   </div>
                   <div className="drilldown-summary-grid">
