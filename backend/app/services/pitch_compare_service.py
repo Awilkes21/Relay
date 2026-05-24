@@ -245,8 +245,14 @@ def _fetch_period_pitches(
         params: list[Any] = [pitcher_id, start_date.isoformat(), end_date.isoformat()]
 
         if pitch_type:
-            where_clauses.append("pitch_type = ?")
-            params.append(pitch_type)
+            pitch_types = [item.strip() for item in pitch_type.split(",") if item.strip()]
+            if len(pitch_types) == 1:
+                where_clauses.append("pitch_type = ?")
+                params.append(pitch_types[0])
+            elif len(pitch_types) > 1:
+                placeholders = ", ".join("?" for _pitch_type in pitch_types)
+                where_clauses.append(f"pitch_type IN ({placeholders})")
+                params.extend(pitch_types)
         if batter_hand:
             where_clauses.append("stand = ?")
             params.append(batter_hand)

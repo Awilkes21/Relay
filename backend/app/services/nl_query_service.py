@@ -1,5 +1,9 @@
+import os
 import re
-from typing import Any, Protocol
+from datetime import date
+from typing import Any, Literal, Protocol
+
+from pydantic import BaseModel, Field
 
 from app.services.pitch_query_service import list_cached_pitchers
 
@@ -9,10 +13,12 @@ PITCH_TYPE_ALIASES = {
     "four-seam fastball": "FF",
     "four seam": "FF",
     "four-seamer": "FF",
+    "four seamers": "FF",
+    "four-seamers": "FF",
     "4 seam": "FF",
     "4-seam": "FF",
-    "fastballs": "FF",
-    "fastball": "FF",
+    "heaters": "FF",
+    "heater": "FF",
     "sinkers": "SI",
     "sinker": "SI",
     "two seam": "SI",
@@ -41,6 +47,22 @@ PITCH_TYPE_ALIASES = {
     "split": "FS",
 }
 
+PITCH_TYPE_GROUP_ALIASES = {
+    "fastballs": "fastball",
+    "fastball": "fastball",
+    "hard stuff": "fastball",
+    "breaking balls": "breaking",
+    "breaking ball": "breaking",
+    "breaking pitches": "breaking",
+    "breaking pitch": "breaking",
+    "breaking stuff": "breaking",
+    "breakers": "breaking",
+    "offspeed pitches": "offspeed",
+    "offspeed pitch": "offspeed",
+    "offspeed stuff": "offspeed",
+    "offspeed": "offspeed",
+}
+
 NUMBER_WORDS = {
     "zero": 0,
     "one": 1,
@@ -53,10 +75,80 @@ HEATMAP_SKILL = "get_pitch_heatmap"
 COMPARE_SKILL = "compare_pitcher_periods"
 ARSENAL_SKILL = "summarize_arsenal"
 MOVEMENT_SKILL = "summarize_movement"
+SkillName = Literal[
+    "search_pitches",
+    "get_pitch_heatmap",
+    "compare_pitcher_periods",
+    "summarize_arsenal",
+    "summarize_movement",
+]
+
+COMMON_ARGS = {
+    "pitcher_name": "Cached pitcher display name.",
+    "pitch_type": "Statcast pitch code, such as FF, SL, CU, CH, SI, FC.",
+    "pitch_type_group": "Pitch family: fastball, breaking, or offspeed.",
+    "season": "Four-digit season.",
+    "balls": "Exact ball count, 0-3.",
+    "strikes": "Exact strike count, 0-2.",
+    "count_group": "Count bucket: ahead, behind, even, two_strikes, full_count.",
+    "min_velocity": "Minimum release velocity in mph.",
+    "max_velocity": "Maximum release velocity in mph.",
+    "batter_hand": "Batter handedness: L or R.",
+    "description": "Statcast pitch result code.",
+    "events": "Statcast plate appearance result code.",
+    "base_state": "bases_empty or runners_on.",
+    "location_filter": "zone or out_of_zone.",
+}
+
+SKILL_REGISTRY: dict[str, dict[str, Any]] = {
+    SEARCH_SKILL: {
+        "description": "Find pitch-level rows matching filters.",
+        "args": COMMON_ARGS,
+    },
+    HEATMAP_SKILL: {
+        "description": "Build a pitch-location heatmap matching filters.",
+        "args": {**COMMON_ARGS, "mode": "Heatmap mode: all, whiffs, hard_contact, in_zone."},
+    },
+    COMPARE_SKILL: {
+        "description": "Compare one pitcher across two periods or a supported preset.",
+        "args": {
+            "pitcher_name": COMMON_ARGS["pitcher_name"],
+            "pitch_type": COMMON_ARGS["pitch_type"],
+            "batter_hand": COMMON_ARGS["batter_hand"],
+            "preset": "Compare preset such as previous_current_season, previous_current_same_span, or season_first_second.",
+            "period_a_season": "Four-digit season for Period 1.",
+            "period_b_season": "Four-digit season for Period 2.",
+            "period_b_to_date": "True when Period 2 should use available data so far.",
+        },
+    },
+    ARSENAL_SKILL: {
+        "description": "Summarize pitch usage and arsenal shape for matching filters.",
+        "args": COMMON_ARGS,
+    },
+    MOVEMENT_SKILL: {
+        "description": "Summarize movement and pitch-shape metrics for matching filters.",
+        "args": COMMON_ARGS,
+    },
+}
+
+
+class SkillCall(BaseModel):
+    skill: SkillName
+    args: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    parser: str = "rule_based"
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+
+class QueryContext(BaseModel):
+    cached_pitchers: list[dict[str, Any]] = Field(default_factory=list)
+    skill_registry: dict[str, dict[str, Any]] = Field(default_factory=lambda: SKILL_REGISTRY)
 
 
 class IntentParser(Protocol):
-    def parse(self, query: str) -> dict[str, Any]:
+    def parse(self, query: str, context: QueryContext | None = None) -> SkillCall:
         ...
 
 
@@ -109,20 +201,22 @@ class RuleBasedQueryIntentParser:
     def __init__(self, pitcher_provider=list_cached_pitchers) -> None:
         self.pitcher_provider = pitcher_provider
 
-    def parse(self, query: str) -> dict[str, Any]:
+    def parse(self, query: str, context: QueryContext | None = None) -> SkillCall:
         normalized_query = _normalize(query)
         args: dict[str, Any] = {}
         warnings: list[str] = []
 
         if not normalized_query:
-            return {
+            return validate_skill_call({
                 "skill": SEARCH_SKILL,
                 "args": args,
                 "warnings": ["Enter a query to translate."],
-            }
+                "parser": "rule_based",
+            })
 
         skill = self._parse_skill(normalized_query)
-        pitcher_name = _unique_pitcher_match(normalized_query, self.pitcher_provider())
+        cached_pitchers = context.cached_pitchers if context else self.pitcher_provider()
+        pitcher_name = _unique_pitcher_match(normalized_query, cached_pitchers)
         if pitcher_name:
             args["pitcher_name"] = pitcher_name
         else:
@@ -132,17 +226,20 @@ class RuleBasedQueryIntentParser:
         if skill == HEATMAP_SKILL:
             args["mode"] = self._parse_heatmap_mode(normalized_query)
         elif skill == COMPARE_SKILL:
+            args.update(self._parse_compare_periods(normalized_query))
             preset = self._parse_compare_preset(normalized_query)
             if preset:
                 args["preset"] = preset
-            else:
+            elif not ("period_a_season" in args and "period_b_season" in args):
                 warnings.append("No supported comparison preset was found.")
+            args.pop("season", None)
 
-        return {
+        return validate_skill_call({
             "skill": skill,
             "args": args,
             "warnings": warnings,
-        }
+            "parser": "rule_based",
+        })
 
     def _parse_skill(self, query: str) -> str:
         if re.search(r"\b(compare|comparison|versus)\b", query):
@@ -158,9 +255,7 @@ class RuleBasedQueryIntentParser:
     def _parse_common_filters(self, query: str) -> dict[str, Any]:
         filters: dict[str, Any] = {}
 
-        pitch_type = self._parse_pitch_type(query)
-        if pitch_type:
-            filters["pitch_type"] = pitch_type
+        filters.update(self._parse_pitch_type_filter(query))
 
         season = self._parse_season(query)
         if season:
@@ -169,6 +264,8 @@ class RuleBasedQueryIntentParser:
         filters.update(self._parse_count(query))
         filters.update(self._parse_velocity(query))
         filters.update(self._parse_batter_hand(query))
+        filters.update(self._parse_base_state(query))
+        filters.update(self._parse_location(query))
         filters.update(self._parse_result_filters(query))
 
         return filters
@@ -179,7 +276,18 @@ class RuleBasedQueryIntentParser:
                 return PITCH_TYPE_ALIASES[phrase]
         return None
 
-    def _parse_count(self, query: str) -> dict[str, int]:
+    def _parse_pitch_type_filter(self, query: str) -> dict[str, str]:
+        pitch_type = self._parse_pitch_type(query)
+        if pitch_type:
+            return {"pitch_type": pitch_type}
+
+        for phrase in sorted(PITCH_TYPE_GROUP_ALIASES, key=len, reverse=True):
+            if re.search(rf"\b{re.escape(phrase)}\b", query):
+                return {"pitch_type_group": PITCH_TYPE_GROUP_ALIASES[phrase]}
+
+        return {}
+
+    def _parse_count(self, query: str) -> dict[str, Any]:
         count_match = re.search(r"\b([0-3])\s*[-/]\s*([0-2])\b", query)
         if count_match:
             return {
@@ -189,6 +297,14 @@ class RuleBasedQueryIntentParser:
 
         if "full count" in query:
             return {"balls": 3, "strikes": 2}
+        if re.search(r"\b(?:two[-\s]?strike|2[-\s]?strike)\s+counts?\b", query):
+            return {"count_group": "two_strikes"}
+        if re.search(r"\b(?:ahead|pitcher ahead)\s+(?:in\s+)?(?:the\s+)?count\b", query):
+            return {"count_group": "ahead"}
+        if re.search(r"\b(?:behind|pitcher behind)\s+(?:in\s+)?(?:the\s+)?count\b", query):
+            return {"count_group": "behind"}
+        if re.search(r"\beven\s+counts?\b|\beven\s+in\s+(?:the\s+)?count\b", query):
+            return {"count_group": "even"}
 
         parsed: dict[str, int] = {}
         for key, max_value in {"balls": 3, "strikes": 2}.items():
@@ -214,6 +330,12 @@ class RuleBasedQueryIntentParser:
             high = float(between_match.group(2))
             return {"min_velocity": min(low, high), "max_velocity": max(low, high)}
 
+        range_match = re.search(r"\b(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*mph\b", query)
+        if range_match:
+            low = float(range_match.group(1))
+            high = float(range_match.group(2))
+            return {"min_velocity": min(low, high), "max_velocity": max(low, high)}
+
         parsed: dict[str, float] = {}
         min_match = re.search(
             r"\b(?:over|above|greater than|at least)\s+(\d+(?:\.\d+)?)\s*(?:mph)?\b",
@@ -232,27 +354,73 @@ class RuleBasedQueryIntentParser:
         return parsed
 
     def _parse_batter_hand(self, query: str) -> dict[str, str]:
-        if re.search(r"\b(?:vs|against)\s+(?:lefties|lefty|lhh|left handed|left-handed)\b", query):
+        left_handed_hitter = (
+            r"(?:lefties|lefty|lhh|left[-\s]?handed\s+(?:hitters?|batters?)|"
+            r"left[-\s]?handed|left\s+(?:hitters?|batters?))"
+        )
+        right_handed_hitter = (
+            r"(?:righties|righty|rhh|right[-\s]?handed\s+(?:hitters?|batters?)|"
+            r"right[-\s]?handed|right\s+(?:hitters?|batters?))"
+        )
+
+        if re.search(rf"\b(?:vs|against|to|facing)\s+{left_handed_hitter}\b", query):
             return {"batter_hand": "L"}
-        if re.search(r"\b(?:vs|against)\s+(?:righties|righty|rhh|right handed|right-handed)\b", query):
+        if re.search(rf"\b{left_handed_hitter}\b", query) and re.search(
+            r"\b(?:hitters?|batters?|lhh|lefties)\b",
+            query,
+        ):
+            return {"batter_hand": "L"}
+
+        if re.search(rf"\b(?:vs|against|to|facing)\s+{right_handed_hitter}\b", query):
             return {"batter_hand": "R"}
+        if re.search(rf"\b{right_handed_hitter}\b", query) and re.search(
+            r"\b(?:hitters?|batters?|rhh|righties)\b",
+            query,
+        ):
+            return {"batter_hand": "R"}
+
         return {}
 
     def _parse_season(self, query: str) -> int | None:
         season_match = re.search(r"\b(20\d{2})\b", query)
-        return int(season_match.group(1)) if season_match else None
+        if season_match:
+            return int(season_match.group(1))
+        if re.search(r"\b(?:this|current)\s+season\b", query):
+            return date.today().year
+        if re.search(r"\b(?:last|previous|prior)\s+season\b", query):
+            return date.today().year - 1
+        return None
 
     def _parse_result_filters(self, query: str) -> dict[str, str]:
-        if re.search(r"\b(whiffs|swings and misses|swinging strikes)\b", query):
+        if re.search(r"\b(whiffs|whiff|misses|swing and miss|swings and misses|swinging strikes|empty swings?)\b", query):
             return {"description": "swinging_strike"}
-        if re.search(r"\b(called strikes|called strike)\b", query):
+        if re.search(r"\b(called strikes|called strike|taken strikes|taken strike|takes)\b", query):
             return {"description": "called_strike"}
-        if re.search(r"\b(in play|balls in play|batted balls)\b", query):
+        if re.search(r"\b(in play|put in play|balls in play|batted balls)\b", query) or (
+            re.search(r"\bcontact\b", query)
+            and not re.search(r"\bhard[-\s]?contact\b", query)
+        ):
             return {"description": "hit_into_play"}
-        if re.search(r"\b(strikeouts|strikeout|ks)\b", query):
+        if re.search(r"\b(strikeouts|strikeout|k's|ks)\b", query):
             return {"events": "strikeout"}
         if re.search(r"\b(home runs|home run|homers|homer)\b", query):
             return {"events": "home_run"}
+        if re.search(r"\b(walks|walk|bases on balls)\b", query):
+            return {"events": "walk"}
+        return {}
+
+    def _parse_base_state(self, query: str) -> dict[str, str]:
+        if re.search(r"\b(runners? on|men on|traffic on|with runners)\b", query):
+            return {"base_state": "runners_on"}
+        if re.search(r"\b(bases empty|empty bases|nobody on|no runners)\b", query):
+            return {"base_state": "bases_empty"}
+        return {}
+
+    def _parse_location(self, query: str) -> dict[str, str]:
+        if re.search(r"\b(in the zone|inside the zone|in zone|zone only)\b", query):
+            return {"location_filter": "zone"}
+        if re.search(r"\b(out of the zone|outside the zone|out of zone|off the plate)\b", query):
+            return {"location_filter": "out_of_zone"}
         return {}
 
     def _parse_heatmap_mode(self, query: str) -> str:
@@ -264,7 +432,31 @@ class RuleBasedQueryIntentParser:
             return "in_zone"
         return "all"
 
+    def _parse_compare_periods(self, query: str) -> dict[str, Any]:
+        years = [int(year) for year in re.findall(r"\b(20\d{2})\b", query)]
+        if len(years) < 2:
+            return {}
+
+        return {
+            "period_a_season": years[0],
+            "period_b_season": years[1],
+            **(
+                {"period_b_to_date": True}
+                if re.search(r"\b(so far|to date|ytd)\b", query)
+                else {}
+            ),
+        }
+
     def _parse_compare_preset(self, query: str) -> str | None:
+        explicit_years = [int(year) for year in re.findall(r"\b(20\d{2})\b", query)]
+        if len(explicit_years) >= 2:
+            first_year, second_year = explicit_years[0], explicit_years[1]
+            current_year = date.today().year
+            if first_year == current_year - 1 and second_year == current_year:
+                if re.search(r"\b(same span|same stretch|same window)\b", query):
+                    return "previous_current_same_span"
+                return "previous_current_season"
+
         if re.search(r"\b(prior|previous|last)\s+season\b", query) and re.search(
             r"\b(current|this)\s+season\b",
             query,
@@ -276,7 +468,7 @@ class RuleBasedQueryIntentParser:
             r"\b(second half|2nd half)\b",
             query,
         ):
-            return "first_second"
+            return "season_first_second"
         if re.search(r"\b(previous|last)\s+30\b", query) and re.search(r"\blast\s+30\b", query):
             return "last30_previous30"
         if re.search(r"\b(first month|1st month)\b", query) and re.search(
@@ -292,5 +484,51 @@ class RuleBasedQueryIntentParser:
         return None
 
 
+class ModelIntentParser:
+    """Placeholder adapter for a future SLM/LLM-backed parser.
+
+    A model adapter should return JSON shaped like SkillCall. Relay should
+    always run that JSON through validate_skill_call before the UI or services
+    see it, so the model never gets to invent executable behavior.
+    """
+
+    def parse(self, query: str, context: QueryContext | None = None) -> SkillCall:
+        raise NotImplementedError("Model-backed natural language parsing is not configured yet.")
+
+
+def validate_skill_call(raw_call: dict[str, Any]) -> SkillCall:
+    call = SkillCall.model_validate(raw_call)
+    allowed_args = set(SKILL_REGISTRY[call.skill]["args"])
+    cleaned_args = {
+        key: value
+        for key, value in call.args.items()
+        if key in allowed_args and value is not None and value != ""
+    }
+    dropped_args = sorted(set(call.args) - allowed_args)
+    warnings = list(call.warnings)
+
+    if dropped_args:
+        warnings.append(f"Ignored unsupported args for {call.skill}: {', '.join(dropped_args)}.")
+
+    return SkillCall(
+        skill=call.skill,
+        args=cleaned_args,
+        warnings=warnings,
+        parser=call.parser,
+    )
+
+
+def get_skill_registry() -> dict[str, dict[str, Any]]:
+    return SKILL_REGISTRY
+
+
+def create_intent_parser() -> IntentParser:
+    provider = os.getenv("RELAY_NL_PARSER", "rule_based").strip().lower()
+    if provider in {"model", "llm", "slm"}:
+        return ModelIntentParser()
+    return RuleBasedQueryIntentParser()
+
+
 def parse_natural_language_query(query: str) -> dict[str, Any]:
-    return RuleBasedQueryIntentParser().parse(query)
+    context = QueryContext(cached_pitchers=list_cached_pitchers())
+    return create_intent_parser().parse(query, context).model_dump()

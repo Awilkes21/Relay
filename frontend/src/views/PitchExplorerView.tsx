@@ -1,7 +1,9 @@
+import { useEffect, useState } from "react";
 import MovementChart from "../components/MovementChart";
 import PitchHeatmap from "../components/PitchHeatmap";
 import StrikeZoneChart from "../components/StrikeZoneChart";
 import { formatPitchType } from "../pitchTypes";
+import { countLabel } from "../text";
 
 type PitchExplorerViewContext = Record<string, any> & {
   activePitchFilterList: any[];
@@ -56,6 +58,41 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
     formatEvent,
     dataQualityMetrics
   } = context;
+  const hasSearchResults = totalResultCount > 0 || results.length > 0;
+  const [isSearchCollapsed, setIsSearchCollapsed] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState({
+    dataQuality: true,
+    arsenal: false,
+    resultsTable: true,
+  });
+
+  useEffect(() => {
+    if (hasSearchResults) {
+      setIsSearchCollapsed(true);
+    } else {
+      setIsSearchCollapsed(false);
+    }
+  }, [hasSearchResults]);
+
+  useEffect(() => {
+    if (hasSearchResults) {
+      setCollapsedSections((current) => ({
+        ...current,
+        resultsTable: true,
+      }));
+    }
+  }, [hasSearchResults]);
+
+  function toggleSection(section: keyof typeof collapsedSections) {
+    setCollapsedSections((current) => ({
+      ...current,
+      [section]: !current[section],
+    }));
+  }
+
+  function disclosureIcon(isCollapsed: boolean) {
+    return isCollapsed ? ">" : "v";
+  }
 
   function formatQualityRate(value: number | null | undefined) {
     return value === null || value === undefined ? "-" : `${Math.round(value * 100)}%`;
@@ -76,7 +113,30 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
           <span>{API_URL}</span>
         </div>
 
-        <form className="filter-panel" onSubmit={handleSearch}>
+        {hasSearchResults ? (
+          <div className="collapsed-search-bar">
+            <div>
+              <span>Pitch Explorer Search</span>
+              <strong>
+                {countLabel(totalResultCount, "matching pitch", "matching pitches")}
+                {activePitchFilterList.length > 0 ? ` | ${countLabel(activePitchFilterList.length, "filter")}` : ""}
+              </strong>
+            </div>
+            <button
+              className="secondary-button"
+              onClick={() => setIsSearchCollapsed((current) => !current)}
+              type="button"
+            >
+              {isSearchCollapsed ? "Edit Search" : "Hide Search"}
+            </button>
+          </div>
+        ) : null}
+
+        <form
+          className={isSearchCollapsed ? "filter-panel is-collapsed" : "filter-panel"}
+          hidden={isSearchCollapsed}
+          onSubmit={handleSearch}
+        >
           {pitcherError ? <div className="inline-note">{pitcherError}</div> : null}
           {pitchOptionsError ? <div className="inline-note">{pitchOptionsError}</div> : null}
           {selectedExplorerPitcher() ? (
@@ -198,14 +258,25 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
 
         {dataQualityMetrics.length > 0 ? (
           <section className="chart-panel data-quality-panel">
-            <div className="chart-heading">
+            <div className="chart-heading collapsible-heading">
               <div>
                 <h3>Data Quality</h3>
                 <p>Availability for fields Relay uses in charts, movement, and contact views.</p>
               </div>
-              <span>Current cache</span>
+              <div className="section-actions">
+                <span>Current cache</span>
+                <button
+                  aria-label={collapsedSections.dataQuality ? "Expand data quality" : "Collapse data quality"}
+                  className="disclosure-button"
+                  onClick={() => toggleSection("dataQuality")}
+                  title={collapsedSections.dataQuality ? "Expand" : "Collapse"}
+                  type="button"
+                >
+                  {disclosureIcon(collapsedSections.dataQuality)}
+                </button>
+              </div>
             </div>
-            <div className="data-quality-grid">
+            <div className="data-quality-grid" hidden={collapsedSections.dataQuality}>
               {dataQualityMetrics.map((metric) => (
                 <div className="data-quality-card" key={metric.key}>
                   <span>{metric.label}</span>
@@ -227,11 +298,13 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
 
         <div className="results-header">
           <h3>Results</h3>
-          <span>
-            {totalResultCount > resultCount
-              ? `Showing ${resultCount} of ${totalResultCount} pitches`
-              : `${resultCount} pitches`}
-          </span>
+          <div className="results-header-actions">
+            <span>
+              {totalResultCount > resultCount
+                ? `Showing ${resultCount} of ${countLabel(totalResultCount, "pitch")}`
+                : countLabel(resultCount, "pitch")}
+            </span>
+          </div>
         </div>
         {results.length > 0 ? (
           <button
@@ -277,11 +350,22 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
 
         {arsenalSummary.length > 0 ? (
           <section className="chart-panel">
-            <div className="chart-heading">
+            <div className="chart-heading collapsible-heading">
               <h3>Arsenal Summary</h3>
-              <span>Current result set</span>
+              <div className="section-actions">
+                <span>Current result set</span>
+                <button
+                  aria-label={collapsedSections.arsenal ? "Expand arsenal summary" : "Collapse arsenal summary"}
+                  className="disclosure-button"
+                  onClick={() => toggleSection("arsenal")}
+                  title={collapsedSections.arsenal ? "Expand" : "Collapse"}
+                  type="button"
+                >
+                  {disclosureIcon(collapsedSections.arsenal)}
+                </button>
+              </div>
             </div>
-            <div className="table-wrap compact-table-wrap">
+            <div className="table-wrap compact-table-wrap" hidden={collapsedSections.arsenal}>
               <table className="mini-table">
                 <thead>
                   <tr>
@@ -321,7 +405,29 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
         <StrikeZoneChart pitches={results} />
         <MovementChart pitches={results} />
 
-        <div className="table-wrap">
+        {results.length > 0 ? (
+          <div className="table-disclosure-bar">
+            <div>
+              <span>Pitch Table</span>
+              <strong>
+                {totalResultCount > resultCount
+                  ? `Showing ${resultCount} of ${countLabel(totalResultCount, "pitch")}`
+                  : countLabel(resultCount, "pitch")}
+              </strong>
+            </div>
+            <button
+              aria-label={collapsedSections.resultsTable ? "Expand pitch table" : "Collapse pitch table"}
+              className="disclosure-button"
+              onClick={() => toggleSection("resultsTable")}
+              title={collapsedSections.resultsTable ? "Expand" : "Collapse"}
+              type="button"
+            >
+              {disclosureIcon(collapsedSections.resultsTable)}
+            </button>
+          </div>
+        ) : null}
+
+        <div className="table-wrap" hidden={results.length > 0 && collapsedSections.resultsTable}>
           {results.length > 0 ? (
             <table>
               <thead>

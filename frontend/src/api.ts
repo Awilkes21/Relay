@@ -21,7 +21,8 @@ export type PitchFilters = {
   single_game?: string;
   start_date?: string;
   end_date?: string;
-  pitch_type?: string;
+  pitch_type?: string | string[];
+  pitch_type_group?: string;
   count?: string;
   balls?: string;
   strikes?: string;
@@ -31,6 +32,7 @@ export type PitchFilters = {
   description?: string;
   events?: string;
   base_state?: string;
+  count_group?: string;
   location_filter?: string;
   result_order?: string;
   limit?: string;
@@ -261,6 +263,20 @@ export type SavedComparison = {
   created_at: string;
 };
 
+export type RelaySkill =
+  | "search_pitches"
+  | "get_pitch_heatmap"
+  | "compare_pitcher_periods"
+  | "summarize_arsenal"
+  | "summarize_movement";
+
+export type RelaySkillCall = {
+  skill: RelaySkill;
+  args: Record<string, string | number | boolean | null | undefined>;
+  warnings: string[];
+  parser?: string;
+};
+
 async function responseError(response: Response, fallback: string) {
   try {
     const body = await response.json();
@@ -303,7 +319,7 @@ export async function getPitchFilterOptions(
   const params = new URLSearchParams();
 
   Object.entries(filters).forEach(([key, value]) => {
-    const trimmedValue = value?.trim();
+    const trimmedValue = Array.isArray(value) ? value.filter(Boolean).join(",") : value?.trim();
     if (
       trimmedValue &&
       key !== "single_game" &&
@@ -333,7 +349,7 @@ export async function searchPitches(filters: PitchFilters): Promise<PitchSearchR
   const params = new URLSearchParams();
 
   Object.entries(filters).forEach(([key, value]) => {
-    const trimmedValue = value?.trim();
+    const trimmedValue = Array.isArray(value) ? value.filter(Boolean).join(",") : value?.trim();
     if (trimmedValue && key !== "single_game" && key !== "count") {
       params.set(key, trimmedValue);
     }
@@ -359,7 +375,7 @@ export async function getPitchHeatmap(
   params.set("mode", mode);
 
   Object.entries(filters).forEach(([key, value]) => {
-    const trimmedValue = value?.trim();
+    const trimmedValue = Array.isArray(value) ? value.filter(Boolean).join(",") : value?.trim();
     if (
       trimmedValue &&
       key !== "single_game" &&
@@ -404,6 +420,22 @@ export async function comparePitcher(
     throw new Error(
       await responseError(response, `Pitcher comparison returned ${response.status}`),
     );
+  }
+
+  return response.json();
+}
+
+export async function parseNaturalLanguageQuery(query: string): Promise<RelaySkillCall> {
+  const response = await fetch(`${API_URL}/query`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ query }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await responseError(response, `Query parser returned ${response.status}`));
   }
 
   return response.json();

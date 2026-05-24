@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import type { HeatmapMode, PitchHeatmapResponse } from "../api";
 import { formatPitchType } from "../pitchTypes";
+import { countLabel } from "../text";
 
 type PitchHeatmapProps = {
+  collapsible?: boolean;
   heatmap: PitchHeatmapResponse | null;
   mode: HeatmapMode;
   isLoading: boolean;
@@ -342,6 +344,7 @@ function pointInsideCircle(point: { x: number; y: number }, circle: SelectionCir
 }
 
 function PitchHeatmap({
+  collapsible = true,
   heatmap,
   mode,
   isLoading,
@@ -354,6 +357,7 @@ function PitchHeatmap({
   const modeLabel = heatmapModes.find((item) => item.value === mode)?.label ?? "All Pitches";
   const sideLabels = horizontalSideLabels(pitcherHand);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [selectionCircle, setSelectionCircle] = useState<SelectionCircle | null>(null);
   const [draftCircle, setDraftCircle] = useState<SelectionCircle | null>(null);
   const [brushInteraction, setBrushInteraction] = useState<BrushInteraction | null>(null);
@@ -507,18 +511,32 @@ function PitchHeatmap({
 
   return (
     <section className="chart-panel" aria-labelledby="heatmap-title">
-      <div className="chart-heading">
+      <div className="chart-heading collapsible-heading">
         <div>
           <h3 id="heatmap-title">{title}</h3>
           {subtitle ? <p>{subtitle}</p> : null}
         </div>
-        <span>
-          {isLoading
-            ? "Loading..."
-            : `${heatmap?.total_count ?? 0} located pitches | ${modeLabel.toLowerCase()}`}
-        </span>
+        <div className="section-actions">
+          <span>
+            {isLoading
+              ? "Loading..."
+              : `${countLabel(heatmap?.total_count ?? 0, "located pitch")} | ${modeLabel.toLowerCase()}`}
+          </span>
+          {collapsible ? (
+            <button
+              aria-label={isCollapsed ? `Expand ${title}` : `Collapse ${title}`}
+              className="disclosure-button"
+              onClick={() => setIsCollapsed((current) => !current)}
+              title={isCollapsed ? "Expand" : "Collapse"}
+              type="button"
+            >
+              {isCollapsed ? ">" : "v"}
+            </button>
+          ) : null}
+        </div>
       </div>
 
+      <div className="chart-body" hidden={collapsible && isCollapsed}>
       <div className="heatmap-tools">
         <div className="heatmap-mode-controls" aria-label="Heatmap mode">
           {heatmapModes.map((item) => (
@@ -650,13 +668,13 @@ function PitchHeatmap({
           <div className="selection-panel-header">
             <span>Selected Area</span>
             <strong>
-              {hasSelectedPitches ? `${selectedSummary.pitchCount} pitches` : "No pitches"}
+              {hasSelectedPitches ? countLabel(selectedSummary.pitchCount, "pitch") : "No pitches"}
             </strong>
           </div>
           <div>
             <span>Selection</span>
             <strong>
-              {hasSelectedPitches ? `${selectedSummary.pitchCount} pitches` : "No pitches"}
+              {hasSelectedPitches ? countLabel(selectedSummary.pitchCount, "pitch") : "No pitches"}
             </strong>
           </div>
           <div>
@@ -707,6 +725,7 @@ function PitchHeatmap({
           </button>
         </div>
       ) : null}
+      </div>
     </section>
   );
 }

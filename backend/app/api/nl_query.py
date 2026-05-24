@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.api.errors import raise_service_error
-from app.services.nl_query_service import parse_natural_language_query
+from app.services.nl_query_service import get_skill_registry, parse_natural_language_query
 
 
 router = APIRouter()
@@ -24,6 +24,7 @@ class SkillCallResponse(BaseModel):
     ]
     args: dict[str, Any]
     warnings: list[str] = []
+    parser: str = "rule_based"
 
 
 @router.post("/query", response_model=SkillCallResponse)
@@ -32,3 +33,8 @@ def query(request: NaturalLanguageQueryRequest) -> dict[str, Any]:
         return parse_natural_language_query(request.query)
     except Exception as exc:
         raise_service_error(exc)
+
+
+@router.get("/query/skills")
+def query_skills() -> dict[str, Any]:
+    return {"skills": get_skill_registry()}

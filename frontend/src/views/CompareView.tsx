@@ -1,7 +1,9 @@
+import { useEffect, useState } from "react";
 import CompareDeltaHeatmap from "../components/CompareDeltaHeatmap";
 import CompareMovementChart from "../components/CompareMovementChart";
 import PitchHeatmap from "../components/PitchHeatmap";
 import { formatPitchType, formatPitchTypeWithCode } from "../pitchTypes";
+import { countLabel } from "../text";
 
 type CompareViewContext = Record<string, any> & {
   activeCompareFilterList: any[];
@@ -59,9 +61,8 @@ function CompareView({ hidden, context }: CompareViewProps) {
     pitchTypes,
     comparePitchTypes,
     topUsageDelta,
-    topVelocityDelta,
-    topSpinDelta,
     formatDelta,
+    formatDeltaWithUnit,
     compareHeatmapA,
     compareHeatmapB,
     compareHeatmapMode,
@@ -70,6 +71,7 @@ function CompareView({ hidden, context }: CompareViewProps) {
     formatDateRange,
     formatRate,
     formatNumber,
+    formatNumberWithUnit,
     drilldownPitchType,
     loadPitchTypeDrilldown,
     isDrilldownLoading,
@@ -85,6 +87,74 @@ function CompareView({ hidden, context }: CompareViewProps) {
     formatDescription,
     formatEvent
   } = context;
+  const [isSearchCollapsed, setIsSearchCollapsed] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState({
+    savedComparisons: true,
+    periodHeatmaps: false,
+    periodTables: true,
+    diffTable: false,
+    drilldownPitches: true,
+  });
+
+  useEffect(() => {
+    if (comparison) {
+      setIsSearchCollapsed(true);
+    } else {
+      setIsSearchCollapsed(false);
+    }
+  }, [comparison]);
+
+  function toggleSection(section: keyof typeof collapsedSections) {
+    setCollapsedSections((current) => ({
+      ...current,
+      [section]: !current[section],
+    }));
+  }
+
+  function disclosureIcon(isCollapsed: boolean) {
+    return isCollapsed ? ">" : "v";
+  }
+
+  const selectedScopePitchTypes = compareFilters.pitch_type
+    .split(",")
+    .map((pitchType: string) => pitchType.trim())
+    .filter(Boolean);
+  const newPitchTypes = comparison
+    ? pitchTypes.filter(
+        (pitchType) =>
+          (comparison.period_a.metrics.pitch_usage[pitchType]?.count ?? 0) === 0 &&
+          (comparison.period_b.metrics.pitch_usage[pitchType]?.count ?? 0) > 0,
+      )
+    : [];
+  const missingPitchTypes = comparison
+    ? pitchTypes.filter(
+        (pitchType) =>
+          (comparison.period_a.metrics.pitch_usage[pitchType]?.count ?? 0) > 0 &&
+          (comparison.period_b.metrics.pitch_usage[pitchType]?.count ?? 0) === 0,
+      )
+    : [];
+
+  function pitchAvailabilityStatus(pitchType: string) {
+    if (!comparison) return null;
+    const periodACount = comparison.period_a.metrics.pitch_usage[pitchType]?.count ?? 0;
+    const periodBCount = comparison.period_b.metrics.pitch_usage[pitchType]?.count ?? 0;
+
+    if (periodACount === 0 && periodBCount > 0) return "New in Period 2";
+    if (periodACount > 0 && periodBCount === 0) return "Missing in Period 2";
+    return null;
+  }
+
+  function largestDeltaWithUnit(
+    values: Record<string, number | null | undefined>,
+    unit: string,
+    digits = 1,
+  ) {
+    const largest = Object.entries(values)
+      .filter((entry): entry is [string, number] => entry[1] !== null && entry[1] !== undefined)
+      .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0];
+
+    return largest ? `${formatPitchType(largest[0])} ${formatDeltaWithUnit(largest[1], "number", unit, digits)}` : "-";
+  }
 
   return (
       <section
@@ -97,7 +167,31 @@ function CompareView({ hidden, context }: CompareViewProps) {
             <span>{API_URL}</span>
           </div>
 
-          <form className="filter-panel compare-workflow" onSubmit={handleCompare}>
+          {comparison ? (
+            <div className="collapsed-search-bar">
+              <div>
+                <span>Comparison Search</span>
+                <strong>
+                  {searchFiltersPitcherName(compareFilters)} |{" "}
+                  {formatShortDateRange(comparison.period_a.start, comparison.period_a.end)} vs{" "}
+                  {formatShortDateRange(comparison.period_b.start, comparison.period_b.end)}
+                </strong>
+              </div>
+              <button
+                className="secondary-button"
+                onClick={() => setIsSearchCollapsed((current) => !current)}
+                type="button"
+              >
+                {isSearchCollapsed ? "Edit Comparison" : "Hide Setup"}
+              </button>
+            </div>
+          ) : null}
+
+          <form
+            className={isSearchCollapsed ? "filter-panel compare-workflow is-collapsed" : "filter-panel compare-workflow"}
+            hidden={isSearchCollapsed}
+            onSubmit={handleCompare}
+          >
             {pitcherError ? <div className="inline-note">{pitcherError}</div> : null}
             {compareDateRange ? (
               <div className="inline-note">
@@ -146,22 +240,43 @@ function CompareView({ hidden, context }: CompareViewProps) {
                 </div>
               </div>
               <div className="filter-grid compare-filter-grid">
-                <label className="filter-field">
-                  <span>Pitch Type</span>
-                  <select
-                    disabled={!compareDateRange}
-                    name="pitch_type"
-                    value={compareFilters.pitch_type}
-                    onChange={(event) => updateCompareFilter("pitch_type", event.target.value)}
-                  >
-                    <option value="">All Pitch Types</option>
-                    {compareOptions.pitch_types.map((pitchType) => (
-                      <option key={pitchType} value={pitchType}>
-                        {formatPitchTypeWithCode(pitchType)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <div className="filter-field compare-pitch-scope-field">
+                  <span>Pitch Types</span>
+                  <div className="compare-pitch-scope-list" aria-label="Pitch type scope">
+                    {compareOptions.pitch_types.length > 0 ? (
+                      compareOptions.pitch_types.map((pitchType) => {
+                        const isSelected = selectedScopePitchTypes.includes(pitchType);
+                        return (
+                          <button
+                            className={
+                              isSelected
+                                ? "pitch-scope-chip is-active"
+                                : "pitch-scope-chip"
+                            }
+                            disabled={!compareDateRange}
+                            key={pitchType}
+                            onClick={() => {
+                              const nextPitchTypes = isSelected
+                                ? selectedScopePitchTypes.filter((value: string) => value !== pitchType)
+                                : [...selectedScopePitchTypes, pitchType];
+                              updateCompareFilter("pitch_type", nextPitchTypes.join(","));
+                            }}
+                            type="button"
+                          >
+                            {formatPitchTypeWithCode(pitchType)}
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <span className="empty-scope-note">Choose a pitcher first</span>
+                    )}
+                  </div>
+                  <small className="field-help">
+                    {selectedScopePitchTypes.length === 0
+                      ? "All pitch types"
+                      : countLabel(selectedScopePitchTypes.length, "pitch type")}
+                  </small>
+                </div>
                 <label className="filter-field">
                   <span>Batter Side</span>
                   <select
@@ -190,11 +305,18 @@ function CompareView({ hidden, context }: CompareViewProps) {
               </div>
               <div className="preset-row compare-preset-row">
                 <button
-                  disabled={!hasComparePresetRange("first_second", compareDateRange)}
+                  disabled={!hasComparePresetRange("previous_current_season", compareDateRange)}
                   type="button"
-                  onClick={() => setComparePreset("first_second")}
+                  onClick={() => setComparePreset("previous_current_season")}
                 >
-                  First Half vs Second Half
+                  Previous Season vs Current Season
+                </button>
+                <button
+                  disabled={!hasComparePresetRange("previous_current_ytd", compareDateRange)}
+                  type="button"
+                  onClick={() => setComparePreset("previous_current_ytd")}
+                >
+                  Prior YTD vs Current YTD
                 </button>
                 <button
                   disabled={!hasComparePresetRange("last30_previous30", compareDateRange)}
@@ -204,13 +326,6 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   Previous 30 vs Last 30
                 </button>
                 <button
-                  disabled={!hasComparePresetRange("month_month", compareDateRange)}
-                  type="button"
-                  onClick={() => setComparePreset("month_month")}
-                >
-                  First Month vs Second Month
-                </button>
-                <button
                   disabled={!hasComparePresetRange("latest_month_previous_month", compareDateRange)}
                   type="button"
                   onClick={() => setComparePreset("latest_month_previous_month")}
@@ -218,18 +333,11 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   Previous Month vs Latest Month
                 </button>
                 <button
-                  disabled={!hasComparePresetRange("previous_current_season", compareDateRange)}
+                  disabled={!hasComparePresetRange("season_first_second", compareDateRange)}
                   type="button"
-                  onClick={() => setComparePreset("previous_current_season")}
+                  onClick={() => setComparePreset("season_first_second")}
                 >
-                  Previous Season vs Current Season
-                </button>
-                <button
-                  disabled={!hasComparePresetRange("previous_current_same_span", compareDateRange)}
-                  type="button"
-                  onClick={() => setComparePreset("previous_current_same_span")}
-                >
-                  Prior Season Same Span
+                  First Half vs Second Half
                 </button>
               </div>
               <div className="compare-period-layout">
@@ -270,7 +378,7 @@ function CompareView({ hidden, context }: CompareViewProps) {
                                         : game.away_team && game.home_team
                                           ? `${game.away_team} at ${game.home_team}`
                                           : null,
-                                      `${game.pitch_count} pitches`,
+                                      countLabel(game.pitch_count, "pitch"),
                                     ]
                                       .filter(Boolean)
                                       .join(" - ")}
@@ -376,51 +484,82 @@ function CompareView({ hidden, context }: CompareViewProps) {
                 </div>
               </div>
               {savedComparisons.length > 0 ? (
-                <div className="saved-row">
-                  <span>Saved</span>
-                  {savedComparisons.map((saved) => (
+                <div className="collapsible-strip">
+                  <div className="collapsible-strip-heading">
+                    <div>
+                      <span>Saved Comparisons</span>
+                      <strong>{countLabel(savedComparisons.length, "saved comparison")}</strong>
+                    </div>
                     <button
-                      key={saved.id}
-                      onClick={() => setCompareFilters(saved.filters)}
+                      aria-label={
+                        collapsedSections.savedComparisons
+                          ? "Expand saved comparisons"
+                          : "Collapse saved comparisons"
+                      }
+                      className="disclosure-button"
+                      onClick={() => toggleSection("savedComparisons")}
+                      title={collapsedSections.savedComparisons ? "Expand" : "Collapse"}
                       type="button"
                     >
-                      {saved.name}
+                      {disclosureIcon(collapsedSections.savedComparisons)}
+                    </button>
+                  </div>
+                  <div className="saved-row" hidden={collapsedSections.savedComparisons}>
+                    {savedComparisons.map((saved) => (
+                      <button
+                        key={saved.id}
+                        onClick={() => setCompareFilters(saved.filters)}
+                        type="button"
+                      >
+                        {saved.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              <div className="display-pitch-filter-row">
+                <div className="display-pitch-filter-heading">
+                  <span>Display</span>
+                  <strong>{visiblePitchTypes.length} / {pitchTypes.length} pitch types</strong>
+                </div>
+                <div className="display-pitch-filter-actions">
+                  <button
+                    className="secondary-button compact-action-button"
+                    onClick={() => setComparePitchTypes(pitchTypes)}
+                    type="button"
+                  >
+                    All
+                  </button>
+                  <button
+                    className="secondary-button compact-action-button"
+                    onClick={() => setComparePitchTypes([])}
+                    type="button"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="display-pitch-chip-row" aria-label="Displayed pitch types">
+                  {pitchTypes.map((pitchType) => (
+                    <button
+                      className={
+                        comparePitchTypes.includes(pitchType)
+                          ? "pitch-display-chip is-active"
+                          : "pitch-display-chip"
+                      }
+                      key={pitchType}
+                      onClick={() => {
+                        setComparePitchTypes((current: string[]) =>
+                          current.includes(pitchType)
+                            ? current.filter((value: string) => value !== pitchType)
+                            : [...current, pitchType],
+                        );
+                      }}
+                      type="button"
+                    >
+                      {formatPitchType(pitchType)}
                     </button>
                   ))}
                 </div>
-              ) : null}
-              <div className="pitch-type-toggles">
-                <span>Pitch Types</span>
-                <button
-                  className="secondary-button compact-action-button"
-                  onClick={() => setComparePitchTypes(pitchTypes)}
-                  type="button"
-                >
-                  Show All
-                </button>
-                <button
-                  className="secondary-button compact-action-button"
-                  onClick={() => setComparePitchTypes([])}
-                  type="button"
-                >
-                  Clear
-                </button>
-                {pitchTypes.map((pitchType) => (
-                  <label key={pitchType}>
-                    <input
-                      checked={comparePitchTypes.includes(pitchType)}
-                      onChange={(event) => {
-                        setComparePitchTypes((current: string[]) =>
-                          event.target.checked
-                            ? [...current, pitchType]
-                            : current.filter((value: string) => value !== pitchType),
-                        );
-                      }}
-                      type="checkbox"
-                    />
-                    {formatPitchType(pitchType)}
-                  </label>
-                ))}
               </div>
               <div className="comparison-summary">
                 <div className="metric-card">
@@ -429,11 +568,11 @@ function CompareView({ hidden, context }: CompareViewProps) {
                 </div>
                 <div className="metric-card">
                   <span>Pitch-Type Velo Delta</span>
-                  <strong>{topVelocityDelta}</strong>
+                  <strong>{largestDeltaWithUnit(comparison.deltas.average_velocity, "mph")}</strong>
                 </div>
                 <div className="metric-card">
                   <span>Pitch-Type Spin Delta</span>
-                  <strong>{topSpinDelta}</strong>
+                  <strong>{largestDeltaWithUnit(comparison.deltas.average_spin_rate, "rpm", 0)}</strong>
                 </div>
                 <div className="metric-card">
                   <span>Pitch Count</span>
@@ -453,7 +592,15 @@ function CompareView({ hidden, context }: CompareViewProps) {
                 </div>
                 <div className="metric-card">
                   <span>Arm Angle</span>
-                  <strong>{formatDelta(comparison.deltas.arm_angle, "number")}</strong>
+                  <strong>{formatDeltaWithUnit(comparison.deltas.arm_angle, "number", "deg", 1)}</strong>
+                </div>
+                <div className="metric-card">
+                  <span>Arsenal Changes</span>
+                  <strong>
+                    {newPitchTypes.length + missingPitchTypes.length === 0
+                      ? "None"
+                      : `${newPitchTypes.length} new / ${missingPitchTypes.length} missing`}
+                  </strong>
                 </div>
               </div>
 
@@ -464,8 +611,28 @@ function CompareView({ hidden, context }: CompareViewProps) {
                 periodBLabel={`Period 2 (${formatShortDateRange(comparison.period_b.start, comparison.period_b.end)})`}
               />
 
-              <div className="comparison-panels">
+              <div className="results-header">
+                <h3>Period Heatmaps</h3>
+                <div className="results-header-actions">
+                  <span>
+                    {formatShortDateRange(comparison.period_a.start, comparison.period_a.end)} and{" "}
+                    {formatShortDateRange(comparison.period_b.start, comparison.period_b.end)}
+                  </span>
+                  <button
+                    aria-label={collapsedSections.periodHeatmaps ? "Expand period heatmaps" : "Collapse period heatmaps"}
+                    className="disclosure-button"
+                    onClick={() => toggleSection("periodHeatmaps")}
+                    title={collapsedSections.periodHeatmaps ? "Expand" : "Collapse"}
+                    type="button"
+                  >
+                    {disclosureIcon(collapsedSections.periodHeatmaps)}
+                  </button>
+                </div>
+              </div>
+
+              <div className="comparison-panels" hidden={collapsedSections.periodHeatmaps}>
                 <PitchHeatmap
+                  collapsible={false}
                   heatmap={compareHeatmapA}
                   mode={compareHeatmapMode}
                   isLoading={isCompareHeatmapLoading}
@@ -475,6 +642,7 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   title="Period 1 Heatmap"
                 />
                 <PitchHeatmap
+                  collapsible={false}
                   heatmap={compareHeatmapB}
                   mode={compareHeatmapMode}
                   isLoading={isCompareHeatmapLoading}
@@ -498,7 +666,26 @@ function CompareView({ hidden, context }: CompareViewProps) {
                 batterHand={compareFilters.batter_hand}
               />
 
-              <div className="comparison-panels">
+              <div className="results-header">
+                <h3>Period Tables</h3>
+                <div className="results-header-actions">
+                  <span>
+                    {formatShortDateRange(comparison.period_a.start, comparison.period_a.end)} and{" "}
+                    {formatShortDateRange(comparison.period_b.start, comparison.period_b.end)}
+                  </span>
+                  <button
+                    aria-label={collapsedSections.periodTables ? "Expand period tables" : "Collapse period tables"}
+                    className="disclosure-button"
+                    onClick={() => toggleSection("periodTables")}
+                    title={collapsedSections.periodTables ? "Expand" : "Collapse"}
+                    type="button"
+                  >
+                    {disclosureIcon(collapsedSections.periodTables)}
+                  </button>
+                </div>
+              </div>
+
+              <div className="comparison-panels" hidden={collapsedSections.periodTables}>
                 <section className="comparison-panel">
                   <h3>Period 1</h3>
                   <p>
@@ -670,16 +857,28 @@ function CompareView({ hidden, context }: CompareViewProps) {
 
               <div className="results-header">
                 <h3>Pitch-Type Diff</h3>
-                <span>
-                  {formatShortDateRange(comparison.period_b.start, comparison.period_b.end)} minus{" "}
-                  {formatShortDateRange(comparison.period_a.start, comparison.period_a.end)}
-                </span>
+                <div className="results-header-actions">
+                  <span>
+                    {formatShortDateRange(comparison.period_b.start, comparison.period_b.end)} minus{" "}
+                    {formatShortDateRange(comparison.period_a.start, comparison.period_a.end)}
+                  </span>
+                  <button
+                    aria-label={collapsedSections.diffTable ? "Expand pitch-type diff table" : "Collapse pitch-type diff table"}
+                    className="disclosure-button"
+                    onClick={() => toggleSection("diffTable")}
+                    title={collapsedSections.diffTable ? "Expand" : "Collapse"}
+                    type="button"
+                  >
+                    {disclosureIcon(collapsedSections.diffTable)}
+                  </button>
+                </div>
               </div>
-              <div className="table-wrap">
+              <div className="table-wrap" hidden={collapsedSections.diffTable}>
                 <table className="comparison-table">
                   <thead>
                     <tr>
                       <th>Pitch</th>
+                      <th>Status</th>
                       <th>A Usage</th>
                       <th>B Usage</th>
                       <th>Usage Delta</th>
@@ -695,15 +894,37 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   <tbody>
                     {visiblePitchTypes.map((pitchType) => (
                       <tr
-                        className={
-                          drilldownPitchType === pitchType
-                            ? "clickable-row is-selected"
-                            : "clickable-row"
-                        }
+                        className={[
+                          "clickable-row",
+                          drilldownPitchType === pitchType ? "is-selected" : "",
+                          pitchAvailabilityStatus(pitchType) === "New in Period 2"
+                            ? "is-new-pitch"
+                            : "",
+                          pitchAvailabilityStatus(pitchType) === "Missing in Period 2"
+                            ? "is-missing-pitch"
+                            : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
                         key={pitchType}
                         onClick={() => loadPitchTypeDrilldown(pitchType)}
                       >
                         <td>{formatPitchType(pitchType)}</td>
+                        <td>
+                          {pitchAvailabilityStatus(pitchType) ? (
+                            <span
+                              className={
+                                pitchAvailabilityStatus(pitchType) === "New in Period 2"
+                                  ? "status-badge status-badge--new"
+                                  : "status-badge status-badge--missing"
+                              }
+                            >
+                              {pitchAvailabilityStatus(pitchType)}
+                            </span>
+                          ) : (
+                            <span className="status-badge">Both</span>
+                          )}
+                        </td>
                         <td>
                           {formatRate(
                             comparison.period_a.metrics.pitch_usage[pitchType]
@@ -723,49 +944,57 @@ function CompareView({ hidden, context }: CompareViewProps) {
                           )}
                         </td>
                         <td>
-                          {formatNumber(
+                          {formatNumberWithUnit(
                             comparison.period_a.metrics.average_velocity[
                               pitchType
                             ],
+                            "mph",
                           )}
                         </td>
                         <td>
-                          {formatNumber(
+                          {formatNumberWithUnit(
                             comparison.period_b.metrics.average_velocity[
                               pitchType
                             ],
+                            "mph",
                           )}
                         </td>
                         <td>
-                          {formatDelta(
+                          {formatDeltaWithUnit(
                             comparison.deltas.average_velocity[pitchType],
                             "number",
+                            "mph",
                           )}
                         </td>
                         <td>
-                          {formatDelta(
+                          {formatDeltaWithUnit(
                             comparison.deltas.average_spin_rate[pitchType],
                             "number",
+                            "rpm",
+                            0,
                           )}
                         </td>
                         <td>
-                          {formatDelta(
+                          {formatDeltaWithUnit(
                             comparison.deltas.average_induced_vertical_break[
                               pitchType
                             ],
                             "number",
+                            "in",
                           )}
                         </td>
                         <td>
-                          {formatDelta(
+                          {formatDeltaWithUnit(
                             comparison.deltas.average_horizontal_break[pitchType],
                             "number",
+                            "in",
                           )}
                         </td>
                         <td>
-                          {formatDelta(
+                          {formatDeltaWithUnit(
                             comparison.deltas.average_arm_angle[pitchType],
                             "number",
+                            "deg",
                           )}
                         </td>
                       </tr>
@@ -785,7 +1014,7 @@ function CompareView({ hidden, context }: CompareViewProps) {
                     <span>
                       {isDrilldownLoading
                         ? "Loading pitches..."
-                        : `${drilldownA.length} in Period 1 | ${drilldownB.length} in Period 2`}
+                        : `${countLabel(drilldownA.length, "pitch")} in Period 1 | ${countLabel(drilldownB.length, "pitch")} in Period 2`}
                     </span>
                   </div>
                   <div className="selection-summary-bar">
@@ -846,91 +1075,107 @@ function CompareView({ hidden, context }: CompareViewProps) {
                       },
                       {
                         label: "Avg Velo",
-                        period1: formatNumber(
+                        period1: formatNumberWithUnit(
                           comparison.period_a.metrics.average_velocity[
                             drilldownPitchType
                           ],
+                          "mph",
                         ),
-                        period2: formatNumber(
+                        period2: formatNumberWithUnit(
                           comparison.period_b.metrics.average_velocity[
                             drilldownPitchType
                           ],
+                          "mph",
                         ),
-                        delta: formatDelta(
+                        delta: formatDeltaWithUnit(
                           comparison.deltas.average_velocity[drilldownPitchType],
                           "number",
+                          "mph",
                         ),
                       },
                       {
                         label: "Avg Spin",
-                        period1: formatNumber(
+                        period1: formatNumberWithUnit(
                           comparison.period_a.metrics.average_spin_rate[
                             drilldownPitchType
                           ],
+                          "rpm",
                           0,
                         ),
-                        period2: formatNumber(
+                        period2: formatNumberWithUnit(
                           comparison.period_b.metrics.average_spin_rate[
                             drilldownPitchType
                           ],
+                          "rpm",
                           0,
                         ),
-                        delta: formatDelta(
+                        delta: formatDeltaWithUnit(
                           comparison.deltas.average_spin_rate[drilldownPitchType],
                           "number",
+                          "rpm",
+                          0,
                         ),
                       },
                       {
                         label: "IVB",
-                        period1: formatNumber(
+                        period1: formatNumberWithUnit(
                           comparison.period_a.metrics
                             .average_induced_vertical_break[drilldownPitchType],
+                          "in",
                         ),
-                        period2: formatNumber(
+                        period2: formatNumberWithUnit(
                           comparison.period_b.metrics
                             .average_induced_vertical_break[drilldownPitchType],
+                          "in",
                         ),
-                        delta: formatDelta(
+                        delta: formatDeltaWithUnit(
                           comparison.deltas.average_induced_vertical_break[
                             drilldownPitchType
                           ],
                           "number",
+                          "in",
                         ),
                       },
                       {
                         label: "HB",
-                        period1: formatNumber(
+                        period1: formatNumberWithUnit(
                           comparison.period_a.metrics.average_horizontal_break[
                             drilldownPitchType
                           ],
+                          "in",
                         ),
-                        period2: formatNumber(
+                        period2: formatNumberWithUnit(
                           comparison.period_b.metrics.average_horizontal_break[
                             drilldownPitchType
                           ],
+                          "in",
                         ),
-                        delta: formatDelta(
+                        delta: formatDeltaWithUnit(
                           comparison.deltas.average_horizontal_break[
                             drilldownPitchType
                           ],
                           "number",
+                          "in",
                         ),
                       },
                       {
                         label: "Arm Angle",
-                        period1: formatNumber(
+                        period1: formatNumberWithUnit(
                           comparison.period_a.metrics.average_arm_angle[
                             drilldownPitchType
                           ],
+                          "deg",
                         ),
-                        period2: formatNumber(
+                        period2: formatNumberWithUnit(
                           comparison.period_b.metrics.average_arm_angle[
                             drilldownPitchType
                           ],
+                          "deg",
                         ),
-                        delta: formatDelta(
+                        delta: formatDeltaWithUnit(
                           comparison.deltas.average_arm_angle[drilldownPitchType],
                           "number",
+                          "deg",
                         ),
                       },
                     ].map((metric) => (
@@ -943,7 +1188,22 @@ function CompareView({ hidden, context }: CompareViewProps) {
                       </div>
                     ))}
                   </div>
-                  <div className="comparison-panels">
+                  <div className="results-header drilldown-table-header">
+                    <h3>Pitch Samples</h3>
+                    <div className="results-header-actions">
+                      <span>First 25 pitches from each period</span>
+                      <button
+                        aria-label={collapsedSections.drilldownPitches ? "Expand pitch samples" : "Collapse pitch samples"}
+                        className="disclosure-button"
+                        onClick={() => toggleSection("drilldownPitches")}
+                        title={collapsedSections.drilldownPitches ? "Expand" : "Collapse"}
+                        type="button"
+                      >
+                        {disclosureIcon(collapsedSections.drilldownPitches)}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="comparison-panels" hidden={collapsedSections.drilldownPitches}>
                     {[
                       {
                         label: `Period 1 (${formatShortDateRange(comparison.period_a.start, comparison.period_a.end)})`,
@@ -956,7 +1216,7 @@ function CompareView({ hidden, context }: CompareViewProps) {
                     ].map((period) => (
                       <section className="comparison-panel" key={period.label}>
                         <h3>{period.label}</h3>
-                        <p>{period.pitches.length} pitches loaded</p>
+                        <p>{countLabel(period.pitches.length, "pitch")} loaded</p>
                         <div className="table-wrap compact-table-wrap">
                           <table className="mini-table">
                             <thead>

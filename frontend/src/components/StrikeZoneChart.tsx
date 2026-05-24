@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PitchResult } from "../api";
 import { formatPitchType } from "../pitchTypes";
+import { countLabel } from "../text";
 
 type StrikeZoneChartProps = {
   pitches: PitchResult[];
@@ -405,6 +406,7 @@ function summaryRate(pitches: PlottedPitch[], predicate: (pitch: PlottedPitch) =
 
 function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
   const plottedPitches = pitches.filter(hasLocation);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [selectedPitch, setSelectedPitch] = useState<PlottedPitch | null>(null);
   const [hoveredPitch, setHoveredPitch] = useState<PlottedPitch | null>(null);
   const [selectedPitchType, setSelectedPitchType] = useState<string | null>(null);
@@ -513,7 +515,7 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
         <text className="chart-tooltip-title" x="12" y="21">
           {summary.bucket.label}
         </text>
-        <text x="12" y="45">{summary.count} pitches | {formatRate(summary.share)} share</text>
+        <text x="12" y="45">{countLabel(summary.count, "pitch")} | {formatRate(summary.share)} share</text>
         <text x="12" y="64">Strike {formatRate(summary.strikeRate)} | Whiff {formatRate(summary.whiffRate)}</text>
         <text x="12" y="83">Top pitch {formatPitchType(summary.topPitchType)}</text>
         <text x="12" y="102">Avg EV {formatContactNumber(summary.averageExitVelocity, "mph")}</text>
@@ -571,13 +573,25 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
       className={isExpanded ? "chart-panel chart-panel--expanded" : "chart-panel"}
       aria-labelledby="strike-zone-title"
     >
-      <div className="chart-heading">
+      <div className="chart-heading collapsible-heading">
         <h3 id="strike-zone-title">Strike Zone</h3>
-        <span>
-          {filteredPitches.length} shown in chart from {plottedPitches.length} filtered pitches
-        </span>
+        <div className="section-actions">
+          <span>
+            {filteredPitches.length} shown in chart from {countLabel(plottedPitches.length, "filtered pitch")}
+          </span>
+          <button
+            aria-label={isCollapsed ? "Expand strike zone chart" : "Collapse strike zone chart"}
+            className="disclosure-button"
+            onClick={() => setIsCollapsed((current) => !current)}
+            title={isCollapsed ? "Expand" : "Collapse"}
+            type="button"
+          >
+            {isCollapsed ? ">" : "v"}
+          </button>
+        </div>
       </div>
 
+      <div className="chart-body" hidden={isCollapsed}>
       <div className="strike-zone-toolbar">
         <div className="strike-zone-toolbar-row">
           <span className="chart-view-note strike-zone-orientation">
@@ -621,7 +635,8 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
             Density
           </button>
           <button
-            className="secondary-button"
+            aria-label="Reset strike zone lens"
+            className="icon-action-button"
             onClick={() => {
               setSelectedPitchType(null);
               setCountFilter("all");
@@ -631,16 +646,19 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
               setSelectedPitch(null);
               setSelectedBucket(null);
             }}
+            title="Reset lens"
             type="button"
           >
-            Reset Lens
+            R
           </button>
           <button
-            className="secondary-button"
+            aria-label={isExpanded ? "Collapse expanded strike zone chart" : "Expand strike zone chart"}
+            className="icon-action-button"
             onClick={() => setIsExpanded((current) => !current)}
+            title={isExpanded ? "Collapse" : "Expand"}
             type="button"
           >
-            {isExpanded ? "Collapse" : "Expand"}
+            {isExpanded ? "x" : "[]"}
           </button>
         </div>
 
@@ -924,6 +942,7 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
           </button>
         </div>
       ) : null}
+      </div>
     </section>
   );
 }

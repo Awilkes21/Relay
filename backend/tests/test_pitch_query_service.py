@@ -57,6 +57,25 @@ class PitchQueryServiceTests(unittest.TestCase):
         self.assertEqual(query, "SELECT * FROM statcast_pitches ORDER BY game_date DESC")
         self.assertEqual(params, [])
 
+    def test_builds_query_for_count_group(self):
+        query, params = _build_pitch_query({"count_group": "ahead", "limit": 25})
+
+        self.assertEqual(
+            query,
+            "SELECT * FROM statcast_pitches WHERE strikes > balls ORDER BY game_date DESC LIMIT ?",
+        )
+        self.assertEqual(params, [25])
+
+    def test_builds_query_for_pitch_type_group(self):
+        query, params = _build_pitch_query({"pitch_type_group": "fastball", "limit": 25})
+
+        self.assertEqual(
+            query,
+            "SELECT * FROM statcast_pitches WHERE pitch_type IN (?, ?, ?) "
+            "ORDER BY game_date DESC LIMIT ?",
+        )
+        self.assertEqual(params, ["FF", "SI", "FC", 25])
+
     def test_escapes_duckdb_string_literals(self):
         self.assertEqual(
             _duckdb_string_literal("C:/relay/o'clock.parquet"),

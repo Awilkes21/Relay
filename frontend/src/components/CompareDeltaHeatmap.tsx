@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import type { PitchHeatmapCell, PitchHeatmapResponse } from "../api";
 import { formatPitchType } from "../pitchTypes";
+import { countLabel } from "../text";
 
 type CompareDeltaHeatmapProps = {
   periodA: PitchHeatmapResponse | null;
@@ -118,8 +119,14 @@ function formatPointDelta(value: number) {
 }
 
 function formatScope(pitchType?: string | null, batterHand?: string | null) {
+  const pitchTypes = pitchType
+    ?.split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
   const parts = [
-    pitchType ? formatPitchType(pitchType) : "All pitches",
+    pitchTypes && pitchTypes.length > 0
+      ? pitchTypes.map((value) => formatPitchType(value)).join(", ")
+      : "All pitches",
     batterHand === "L" ? "vs LHH" : batterHand === "R" ? "vs RHH" : null,
   ].filter(Boolean);
 
@@ -305,6 +312,7 @@ function CompareDeltaHeatmap({
   batterHand,
   pitchType,
 }: CompareDeltaHeatmapProps) {
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [hoverReadout, setHoverReadout] = useState<HoverReadout | null>(null);
   const baseHeatmap = periodB ?? periodA;
@@ -386,7 +394,7 @@ function CompareDeltaHeatmap({
 
   return (
     <section className="chart-panel delta-heatmap-panel" aria-labelledby="delta-heatmap-title">
-      <div className="chart-heading">
+      <div className="chart-heading collapsible-heading">
         <div>
           <h3 id="delta-heatmap-title">Location Share Delta</h3>
           <p>
@@ -395,13 +403,25 @@ function CompareDeltaHeatmap({
             color scaled within this comparison
           </p>
         </div>
-        <span>
-          {isLoading
-            ? "Loading..."
-            : `${periodA?.total_count ?? 0} located Period 1 pitches | ${periodB?.total_count ?? 0} located Period 2 pitches`}
-        </span>
+        <div className="section-actions">
+          <span>
+            {isLoading
+              ? "Loading..."
+              : `${countLabel(periodA?.total_count ?? 0, "located Period 1 pitch")} | ${countLabel(periodB?.total_count ?? 0, "located Period 2 pitch")}`}
+          </span>
+          <button
+            aria-label={isCollapsed ? "Expand location share delta" : "Collapse location share delta"}
+            className="disclosure-button"
+            onClick={() => setIsCollapsed((current) => !current)}
+            title={isCollapsed ? "Expand" : "Collapse"}
+            type="button"
+          >
+            {isCollapsed ? ">" : "v"}
+          </button>
+        </div>
       </div>
 
+      <div className="chart-body" hidden={isCollapsed}>
       <div className="delta-heatmap-tools">
         <div className="delta-heatmap-legend" aria-label="Delta heatmap legend">
           <span>Period 2 lower</span>
@@ -512,6 +532,7 @@ function CompareDeltaHeatmap({
         {!isLoading && deltaCells.length === 0 ? (
           <p className="chart-empty">Run a comparison to see location deltas.</p>
         ) : null}
+      </div>
       </div>
     </section>
   );

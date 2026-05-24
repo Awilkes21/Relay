@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { PitchResult } from "../api";
 import { formatPitchType } from "../pitchTypes";
+import { countLabel } from "../text";
 
 type MovementChartProps = {
   pitches: PitchResult[];
@@ -100,6 +101,7 @@ function armAngleLine(
 }
 
 function MovementChart({ pitches }: MovementChartProps) {
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedPitch, setSelectedPitch] = useState<PlottedMovementPitch | null>(null);
   const [hoveredPitch, setHoveredPitch] = useState<PlottedMovementPitch | null>(null);
@@ -206,22 +208,36 @@ function MovementChart({ pitches }: MovementChartProps) {
       className={isExpanded ? "chart-panel chart-panel--expanded" : "chart-panel"}
       aria-labelledby="movement-title"
     >
-      <div className="chart-heading">
+      <div className="chart-heading collapsible-heading">
         <h3 id="movement-title">Movement</h3>
-        <span>{plottedPitches.length} plotted pitches | pitcher view</span>
+        <div className="section-actions">
+          <span>{countLabel(plottedPitches.length, "plotted pitch")} | pitcher view</span>
+          <button
+            aria-label={isCollapsed ? "Expand movement chart" : "Collapse movement chart"}
+            className="disclosure-button"
+            onClick={() => setIsCollapsed((current) => !current)}
+            title={isCollapsed ? "Expand" : "Collapse"}
+            type="button"
+          >
+            {isCollapsed ? ">" : "v"}
+          </button>
+        </div>
       </div>
 
+      <div className="chart-body" hidden={isCollapsed}>
       <div className="strike-zone-toolbar movement-toolbar">
         <div className="strike-zone-toolbar-row">
           <span className="chart-view-note strike-zone-orientation">
             {sideLabels.left} / {sideLabels.right} | Rise / Drop
           </span>
           <button
-            className="secondary-button"
+            aria-label={isExpanded ? "Collapse expanded movement chart" : "Expand movement chart"}
+            className="icon-action-button"
             onClick={() => setIsExpanded((current) => !current)}
+            title={isExpanded ? "Collapse" : "Expand"}
             type="button"
           >
-            {isExpanded ? "Collapse" : "Expand"}
+            {isExpanded ? "x" : "[]"}
           </button>
         </div>
         <div className="strike-zone-toolbar-row strike-zone-toolbar-row--secondary">
@@ -416,6 +432,7 @@ function MovementChart({ pitches }: MovementChartProps) {
           </button>
         </div>
       ) : null}
+      </div>
     </section>
   );
 }

@@ -25,6 +25,7 @@ class NaturalLanguageQueryApiTests(unittest.TestCase):
                 "mode": "whiffs",
             },
             "warnings": [],
+            "parser": "rule_based",
         }
 
         with patch("app.api.nl_query.parse_natural_language_query", return_value=payload) as parse:

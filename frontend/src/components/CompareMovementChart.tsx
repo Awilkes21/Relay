@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PitcherCompareResponse } from "../api";
 import { formatPitchType } from "../pitchTypes";
+import { countLabel } from "../text";
 
 type CompareMovementChartProps = {
   comparison: PitcherCompareResponse;
@@ -25,6 +26,7 @@ type MovementPair = {
   b: MovementPoint | null;
   distance: number | null;
   lowSample: boolean;
+  status: "both" | "new" | "missing";
 };
 
 const width = 900;
@@ -112,6 +114,8 @@ function compareMovementClass(pair: MovementPair, selected: boolean) {
     "compare-movement-pair",
     selected ? "is-selected" : "",
     pair.lowSample ? "is-low-sample" : "",
+    pair.status === "new" ? "is-new-pitch" : "",
+    pair.status === "missing" ? "is-missing-pitch" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -193,6 +197,7 @@ function CompareMovementChart({
   periodBLabel,
   visiblePitchTypes,
 }: CompareMovementChartProps) {
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [selectedPitchType, setSelectedPitchType] = useState<string | null>(null);
   const [hoveredPitchType, setHoveredPitchType] = useState<string | null>(null);
   const [chartMode, setChartMode] = useState<ChartMode>("overlay");
@@ -205,6 +210,8 @@ function CompareMovementChart({
         .map((pitchType): MovementPair => {
           const a = movementPoint(comparison, pitchType, "A");
           const b = movementPoint(comparison, pitchType, "B");
+          const aCount = comparison.period_a.metrics.pitch_usage[pitchType]?.count ?? 0;
+          const bCount = comparison.period_b.metrics.pitch_usage[pitchType]?.count ?? 0;
           const counts = [a?.count, b?.count].filter(
             (count): count is number => count !== undefined,
           );
@@ -215,6 +222,7 @@ function CompareMovementChart({
             b,
             distance: movementDistance(a, b),
             lowSample: counts.some((count) => count > 0 && count < lowSampleThreshold),
+            status: aCount === 0 && bCount > 0 ? "new" : aCount > 0 && bCount === 0 ? "missing" : "both",
           };
         })
         .filter((pair) => pair.a || pair.b),
@@ -314,8 +322,15 @@ function CompareMovementChart({
         <text className="chart-tooltip-title" x="12" y="21">
           {formatPitchType(pair.pitchType)}
         </text>
-        <text x="12" y="43">{periodACompactLabel}: {pair.a?.count ?? 0} pitches | HB {formatNumber(pair.a?.horizontalBreak)}</text>
-        <text x="12" y="61">{periodBCompactLabel}: {pair.b?.count ?? 0} pitches | HB {formatNumber(pair.b?.horizontalBreak)}</text>
+        <text x="12" y="43">{periodACompactLabel}: {countLabel(pair.a?.count ?? 0, "pitch")} | HB {formatNumber(pair.a?.horizontalBreak)}</text>
+        <text x="12" y="61">{periodBCompactLabel}: {countLabel(pair.b?.count ?? 0, "pitch")} | HB {formatNumber(pair.b?.horizontalBreak)}</text>
+        <text x="12" y="79">
+          {pair.status === "new"
+            ? "New in Period 2"
+            : pair.status === "missing"
+              ? "Missing in Period 2"
+              : `Shape change ${formatNumber(pair.distance)}"`}
+        </text>
         <text x="12" y="79">Move {formatNumber(pair.distance)}" | IVB {formatNumber(pair.b?.inducedVerticalBreak)}</text>
         <text x="12" y="97">Click to pin</text>
       </g>
@@ -489,11 +504,23 @@ function CompareMovementChart({
 
   return (
     <section className="chart-panel" aria-labelledby="compare-movement-title">
-      <div className="chart-heading">
+      <div className="chart-heading collapsible-heading">
         <h3 id="compare-movement-title">Movement Diff</h3>
-        <span>{movementPairs.length} pitch types | period averages</span>
+        <div className="section-actions">
+          <span>{countLabel(movementPairs.length, "pitch type")} | period averages</span>
+          <button
+            aria-label={isCollapsed ? "Expand movement diff chart" : "Collapse movement diff chart"}
+            className="disclosure-button"
+            onClick={() => setIsCollapsed((current) => !current)}
+            title={isCollapsed ? "Expand" : "Collapse"}
+            type="button"
+          >
+            {isCollapsed ? ">" : "v"}
+          </button>
+        </div>
       </div>
 
+      <div className="chart-body" hidden={isCollapsed}>
       <div className="strike-zone-toolbar movement-toolbar">
         <div className="strike-zone-toolbar-row">
           <span className="chart-view-note strike-zone-orientation">
@@ -707,6 +734,16 @@ function CompareMovementChart({
             <strong>{formatPitchType(selectedPair.pitchType)}</strong>
           </div>
           <div>
+            <span>Status</span>
+            <strong>
+              {selectedPair.status === "new"
+                ? "New in Period 2"
+                : selectedPair.status === "missing"
+                  ? "Missing in Period 2"
+                  : "Both periods"}
+            </strong>
+          </div>
+          <div>
             <span>{periodALabel} Count</span>
             <strong>{selectedPair.a?.count ?? 0}</strong>
           </div>
@@ -749,6 +786,7 @@ function CompareMovementChart({
           </button>
         </div>
       ) : null}
+      </div>
     </section>
   );
 }

@@ -78,6 +78,10 @@ class PitchFilterParams:
         start_date: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
         end_date: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
         pitch_type: str | None = Query(default=None, min_length=1),
+        pitch_type_group: str | None = Query(
+            default=None,
+            pattern="^(fastball|breaking|offspeed)$",
+        ),
         balls: int | None = Query(default=None, ge=0, le=3),
         strikes: int | None = Query(default=None, ge=0, le=2),
         min_velocity: float | None = Query(default=None, ge=0),
@@ -86,6 +90,10 @@ class PitchFilterParams:
         description: str | None = Query(default=None, min_length=1),
         events: str | None = Query(default=None, min_length=1),
         base_state: str | None = Query(default=None, pattern="^(runners_on|bases_empty)$"),
+        count_group: str | None = Query(
+            default=None,
+            pattern="^(ahead|behind|even|two_strikes|full_count)$",
+        ),
         location_filter: LocationFilter | None = Query(
             default=None,
             pattern=LOCATION_FILTER_PATTERN,
@@ -97,6 +105,7 @@ class PitchFilterParams:
         self.start_date = start_date
         self.end_date = end_date
         self.pitch_type = pitch_type
+        self.pitch_type_group = pitch_type_group
         self.balls = balls
         self.strikes = strikes
         self.min_velocity = min_velocity
@@ -105,6 +114,7 @@ class PitchFilterParams:
         self.description = description
         self.events = events
         self.base_state = base_state
+        self.count_group = count_group
         self.location_filter = location_filter
 
         if min_velocity is not None and max_velocity is not None and min_velocity > max_velocity:
@@ -121,6 +131,7 @@ class PitchFilterParams:
             "start_date": self.start_date,
             "end_date": self.end_date,
             "pitch_type": self.pitch_type,
+            "pitch_type_group": self.pitch_type_group,
             "balls": self.balls,
             "strikes": self.strikes,
             "min_velocity": self.min_velocity,
@@ -129,6 +140,7 @@ class PitchFilterParams:
             "description": self.description,
             "events": self.events,
             "base_state": self.base_state,
+            "count_group": self.count_group,
             "location_filter": self.location_filter,
         }
 

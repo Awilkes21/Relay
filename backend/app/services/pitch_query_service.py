@@ -25,6 +25,21 @@ HEATMAP_Z_MIN = 0.0
 HEATMAP_Z_MAX = 5.0
 HARD_CONTACT_MIN_LAUNCH_SPEED = 95
 WHIFF_DESCRIPTIONS = ("swinging_strike", "swinging_strike_blocked", "missed_bunt")
+PITCH_TYPE_GROUPS = {
+    "fastball": ("FF", "SI", "FC"),
+    "breaking": ("SL", "ST", "CU", "KC", "SV"),
+    "offspeed": ("CH", "FS", "FO", "SC"),
+}
+
+
+def _pitch_type_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [str(value).strip()]
 
 
 def _zone_condition() -> str:
@@ -52,8 +67,25 @@ def _build_where_clause(filters: dict[str, Any]) -> tuple[str, list[Any]]:
     for filter_name, column_name in exact_filters.items():
         value = filters.get(filter_name)
         if value is not None:
-            where_clauses.append(f"{column_name} = ?")
-            params.append(value)
+            if filter_name == "pitch_type":
+                pitch_types = _pitch_type_values(value)
+                if len(pitch_types) == 1:
+                    where_clauses.append("pitch_type = ?")
+                    params.append(pitch_types[0])
+                elif len(pitch_types) > 1:
+                    placeholders = ", ".join("?" for _pitch_type in pitch_types)
+                    where_clauses.append(f"pitch_type IN ({placeholders})")
+                    params.extend(pitch_types)
+            else:
+                where_clauses.append(f"{column_name} = ?")
+                params.append(value)
+
+    pitch_type_group = filters.get("pitch_type_group")
+    if pitch_type_group in PITCH_TYPE_GROUPS:
+        pitch_types = PITCH_TYPE_GROUPS[pitch_type_group]
+        placeholders = ", ".join("?" for _pitch_type in pitch_types)
+        where_clauses.append(f"pitch_type IN ({placeholders})")
+        params.extend(pitch_types)
 
     pitcher_name = filters.get("pitcher_name")
     if pitcher_name:
@@ -75,6 +107,18 @@ def _build_where_clause(filters: dict[str, Any]) -> tuple[str, list[Any]]:
         where_clauses.append("(on_1b IS NOT NULL OR on_2b IS NOT NULL OR on_3b IS NOT NULL)")
     elif base_state == "bases_empty":
         where_clauses.append("(on_1b IS NULL AND on_2b IS NULL AND on_3b IS NULL)")
+
+    count_group = filters.get("count_group")
+    if count_group == "ahead":
+        where_clauses.append("strikes > balls")
+    elif count_group == "behind":
+        where_clauses.append("balls > strikes")
+    elif count_group == "even":
+        where_clauses.append("balls = strikes")
+    elif count_group == "two_strikes":
+        where_clauses.append("strikes = 2")
+    elif count_group == "full_count":
+        where_clauses.append("(balls = 3 AND strikes = 2)")
 
     location_filter = filters.get("location_filter")
     if location_filter == "zone":

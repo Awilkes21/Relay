@@ -10,6 +10,7 @@ import {
   type PitcherCompareResponse,
   type PitchFilters,
   type PitchResult,
+  type RelaySkillCall,
   type SavedComparison,
   comparePitcher,
   getCacheMetadata,
@@ -17,23 +18,26 @@ import {
   getHealth,
   getPitchFilterOptions,
   getPitchers,
+  parseNaturalLanguageQuery,
   searchPitches,
 } from "./api";
 import PitchExplorerView from "./views/PitchExplorerView";
 import CompareView from "./views/CompareView";
 import { formatPitchType, formatPitchTypeWithCode } from "./pitchTypes";
+import { countLabel } from "./text";
 import "./App.css";
 
 type BackendStatus = "checking" | "connected" | "error";
-type ActiveView = "explorer" | "compare";
+type ActiveView = "home" | "explorer" | "compare";
 type ThemeMode = "light" | "dark";
 type ComparePreset =
-  | "first_second"
   | "last30_previous30"
   | "month_month"
   | "latest_month_previous_month"
+  | "previous_current_ytd"
   | "previous_current_season"
-  | "previous_current_same_span";
+  | "previous_current_same_span"
+  | "season_first_second";
 type DateRange = {
   start: Date;
   end: Date;
@@ -69,6 +73,7 @@ const initialFilters: PitchFilters = {
   start_date: "",
   end_date: "",
   pitch_type: "",
+  pitch_type_group: "",
   count: "",
   balls: "",
   strikes: "",
@@ -78,6 +83,7 @@ const initialFilters: PitchFilters = {
   description: "",
   events: "",
   base_state: "",
+  count_group: "",
   location_filter: "",
   result_order: "latest",
   limit: "500",
@@ -314,6 +320,27 @@ function formatDelta(value: number | null | undefined, kind: "rate" | "number") 
     : `${sign}${value.toFixed(1)}`;
 }
 
+function formatDeltaWithUnit(
+  value: number | null | undefined,
+  kind: "rate" | "number",
+  unit = "",
+  digits = 1,
+) {
+  if (value === null || value === undefined) return "-";
+  if (kind === "rate") return formatDelta(value, "rate");
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(digits)}${unit ? ` ${unit}` : ""}`;
+}
+
+function formatNumberWithUnit(
+  value: number | null | undefined,
+  unit: string,
+  digits = 1,
+) {
+  if (value === null || value === undefined) return "-";
+  return `${value.toFixed(digits)} ${unit}`;
+}
+
 function rateFromPitches(pitches: PitchResult[], predicate: (pitch: PitchResult) => boolean) {
   if (pitches.length === 0) return null;
   return pitches.filter(predicate).length / pitches.length;
@@ -381,6 +408,23 @@ function formatPersonName(value: string | null | undefined) {
 
 function searchFiltersPitcherName(filters: Pick<CompareFilters, "pitcher_name" | "pitcher_id">) {
   return formatPersonName(filters.pitcher_name) || (filters.pitcher_id ? "selected pitcher" : "selected pitcher");
+}
+
+function pitchPhraseFromTypes(pitchTypes: string[] | undefined, preferredTypes: string[]) {
+  const availableTypes = new Set(pitchTypes ?? []);
+  const pitchType = preferredTypes.find((type) => availableTypes.has(type));
+  const phrases: Record<string, string> = {
+    FF: "four seam fastballs",
+    SI: "sinkers",
+    FC: "cutters",
+    SL: "sliders",
+    ST: "sweepers",
+    CU: "curveballs",
+    KC: "knuckle curves",
+    CH: "changeups",
+    FS: "splitters",
+  };
+  return pitchType ? phrases[pitchType] ?? formatPitchType(pitchType).toLowerCase() : null;
 }
 
 function pitchSortValue(pitch: PitchResult, key: PitchSortKey) {
@@ -508,7 +552,7 @@ function averageNumbers(values: number[]) {
 function App() {
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("checking");
   const [statusText, setStatusText] = useState("Checking backend...");
-  const [activeView, setActiveView] = useState<ActiveView>("explorer");
+  const [activeView, setActiveView] = useState<ActiveView>("home");
   const [theme, setTheme] = useState<ThemeMode>(() =>
     window.localStorage.getItem("relay.theme") === "dark" ? "dark" : "light",
   );
@@ -551,6 +595,11 @@ function App() {
   const [isDrilldownLoading, setIsDrilldownLoading] = useState(false);
   const [savedComparisons, setSavedComparisons] = useState<SavedComparison[]>([]);
   const [comparisonName, setComparisonName] = useState("");
+  const [askQuery, setAskQuery] = useState("");
+  const [skillCall, setSkillCall] = useState<RelaySkillCall | null>(null);
+  const [isParsingQuery, setIsParsingQuery] = useState(false);
+  const [askError, setAskError] = useState<string | null>(null);
+  const [askNotice, setAskNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -669,6 +718,7 @@ function App() {
       let changed = false;
 
       if (
+        typeof currentFilters.pitch_type === "string" &&
         currentFilters.pitch_type &&
         pitchOptions.pitch_types.length > 0 &&
         !pitchOptions.pitch_types.includes(currentFilters.pitch_type)
@@ -814,14 +864,141 @@ function App() {
       .sort((a, b) => a.start.getTime() - b.start.getTime());
   }
 
+  function dateRangesFromGameDates(gameDates: Array<{ game_date: string }>) {
+    const dates = Array.from(new Set(gameDates.map((game) => game.game_date).filter(Boolean)))
+      .map(dateFromIso)
+      .sort(compareDateAsc);
+
+    const bySeason = new Map<number, Date[]>();
+    const byMonth = new Map<string, Date[]>();
+    dates.forEach((date) => {
+      bySeason.set(date.getFullYear(), [...(bySeason.get(date.getFullYear()) ?? []), date]);
+      byMonth.set(monthKey(date), [...(byMonth.get(monthKey(date)) ?? []), date]);
+    });
+
+    const seasons = Array.from(bySeason.entries())
+      .map(([season, seasonDates]) => {
+        const sortedDates = seasonDates.sort(compareDateAsc);
+        return {
+          season,
+          start: sortedDates[0],
+          end: sortedDates.at(-1)!,
+          gameCount: sortedDates.length,
+        };
+      })
+      .sort((a, b) => a.season - b.season);
+
+    const months = Array.from(byMonth.entries())
+      .map(([key, monthDates]) => {
+        const sortedDates = monthDates.sort(compareDateAsc);
+        return {
+          key,
+          start: sortedDates[0],
+          end: sortedDates.at(-1)!,
+          gameCount: sortedDates.length,
+        };
+      })
+      .sort((a, b) => a.start.getTime() - b.start.getTime());
+
+    return { dates, seasons, months };
+  }
+
+  function compareFiltersWithPreset(
+    baseFilters: CompareFilters,
+    preset: ComparePreset,
+    gameDates: Array<{ game_date: string }>,
+  ) {
+    const { dates, seasons, months } = dateRangesFromGameDates(gameDates);
+    if (dates.length < 2) return null;
+
+    const first = dates[0];
+    const last = dates.at(-1)!;
+    const days = inclusiveDayCount(first, last);
+    let periodA: DateRange;
+    let periodB: DateRange;
+
+    if (preset === "season_first_second") {
+      const periodADays = Math.floor(days / 2);
+      const aEnd = addDays(first, periodADays - 1);
+      periodA = { start: first, end: aEnd };
+      periodB = { start: addDays(aEnd, 1), end: last };
+    } else if (preset === "last30_previous30") {
+      if (days < 60) return null;
+      const bStart = addDays(last, -29);
+      const aEnd = addDays(bStart, -1);
+      periodA = { start: addDays(aEnd, -29), end: aEnd };
+      periodB = { start: bStart, end: last };
+    } else if (preset === "month_month") {
+      if (months.length < 2) return null;
+      periodA = months[0];
+      periodB = months[1];
+    } else if (preset === "latest_month_previous_month") {
+      if (months.length < 2) return null;
+      periodA = months.at(-2)!;
+      periodB = months.at(-1)!;
+    } else {
+      if (seasons.length < 2) return null;
+      const previous = seasons.at(-2)!;
+      const current = seasons.at(-1)!;
+      if (preset === "previous_current_same_span" || preset === "previous_current_ytd") {
+        const currentDays = inclusiveDayCount(current.start, current.end);
+        const previousEnd = addDays(previous.start, currentDays - 1);
+        periodA = {
+          start: previous.start,
+          end: previousEnd > previous.end ? previous.end : previousEnd,
+        };
+        periodB = current;
+      } else {
+        periodA = previous;
+        periodB = current;
+      }
+    }
+
+    return {
+      ...baseFilters,
+      a_game: "",
+      b_game: "",
+      a_start: isoDate(periodA.start),
+      a_end: isoDate(periodA.end),
+      b_start: isoDate(periodB.start),
+      b_end: isoDate(periodB.end),
+    };
+  }
+
+  function compareFiltersWithSeasonYears(
+    baseFilters: CompareFilters,
+    periodASeason: number,
+    periodBSeason: number,
+    gameDates: Array<{ game_date: string }>,
+  ) {
+    const { seasons } = dateRangesFromGameDates(gameDates);
+    const periodA = seasons.find((season) => season.season === periodASeason);
+    const periodB = seasons.find((season) => season.season === periodBSeason);
+    if (!periodA || !periodB) return null;
+
+    return {
+      ...baseFilters,
+      a_game: "",
+      b_game: "",
+      a_start: isoDate(periodA.start),
+      a_end: isoDate(periodA.end),
+      b_start: isoDate(periodB.start),
+      b_end: isoDate(periodB.end),
+    };
+  }
+
   function comparePresetError(preset: ComparePreset) {
-    if (preset === "first_second") {
-      return "This pitcher needs at least two cached dates for a first-half comparison.";
+    if (preset === "season_first_second") {
+      return "This pitcher needs at least two cached dates for a first-half vs second-half comparison.";
     }
     if (preset === "month_month" || preset === "latest_month_previous_month") {
       return "This pitcher needs cached data in at least two calendar months for this preset.";
     }
-    if (preset === "previous_current_season" || preset === "previous_current_same_span") {
+    if (
+      preset === "previous_current_season" ||
+      preset === "previous_current_same_span" ||
+      preset === "previous_current_ytd"
+    ) {
       return "This pitcher needs cached data in at least two seasons for this preset.";
     }
     return "This pitcher needs at least 60 cached dates for this 30-day preset.";
@@ -909,7 +1086,7 @@ function App() {
       .sort()
       .at(-1);
 
-    return `${pitchers.length} pitchers | ${totalPitches} pitches | ${firstDate} to ${lastDate}`;
+    return `${countLabel(pitchers.length, "pitcher")} | ${countLabel(totalPitches, "pitch")} | ${firstDate} to ${lastDate}`;
   }
 
   function hasComparePresetRange(preset: ComparePreset, pitcher = compareDateRangePitcher()) {
@@ -920,11 +1097,11 @@ function App() {
       first,
       last,
     );
-    if (preset === "first_second") return days >= 2;
+    if (preset === "season_first_second") return days >= 2;
     if (preset === "month_month") return monthKey(first) !== monthKey(last);
     if (preset === "latest_month_previous_month") return compareMonthRanges().length >= 2;
     if (preset === "previous_current_season") return latestTwoSeasonRanges() !== null;
-    if (preset === "previous_current_same_span") {
+    if (preset === "previous_current_same_span" || preset === "previous_current_ytd") {
       const ranges = latestTwoSeasonRanges();
       if (!ranges) return false;
       return ranges.previous.gameCount > 0 && ranges.current.gameCount > 0;
@@ -948,7 +1125,7 @@ function App() {
     const last = dateFromIso(pitcher.last_game_date);
     const days = inclusiveDayCount(first, last);
 
-    if (preset === "first_second") {
+    if (preset === "season_first_second") {
       const periodADays = Math.floor(days / 2);
       const aEnd = addDays(first, periodADays - 1);
       const bStart = addDays(aEnd, 1);
@@ -982,6 +1159,339 @@ function App() {
     }
   }
 
+  function skillNameLabel(skill: RelaySkillCall["skill"]) {
+    if (skill === "search_pitches") return "Pitch Search";
+    if (skill === "get_pitch_heatmap") return "Heatmap";
+    if (skill === "compare_pitcher_periods") return "Compare";
+    if (skill === "summarize_arsenal") return "Arsenal Summary";
+    return "Movement Summary";
+  }
+
+  function skillArgLabel(name: string) {
+    const labels: Record<string, string> = {
+      pitcher_name: "Pitcher",
+      pitch_type: "Pitch Type",
+      pitch_type_group: "Pitch Family",
+      season: "Season",
+      balls: "Balls",
+      strikes: "Strikes",
+      min_velocity: "Min Velo",
+      max_velocity: "Max Velo",
+      batter_hand: "Batter Side",
+      description: "Pitch Result",
+      events: "PA Result",
+      base_state: "Base State",
+      count_group: "Count Group",
+      location_filter: "Pitch Location",
+      mode: "Heatmap Mode",
+      preset: "Preset",
+      period_a_season: "Period 1 Season",
+      period_b_season: "Period 2 Season",
+      period_b_to_date: "Period 2 To Date",
+    };
+    return labels[name] ?? name.replaceAll("_", " ");
+  }
+
+  function skillArgDisplayValue(name: string, value: string | number | boolean | null | undefined) {
+    if (value === null || value === undefined || value === "") return "-";
+    const stringValue = String(value);
+    if (name === "pitch_type") return formatPitchTypeWithCode(stringValue);
+    if (name === "pitch_type_group") {
+      const labels: Record<string, string> = {
+        fastball: "Fastballs",
+        breaking: "Breaking Balls",
+        offspeed: "Offspeed",
+      };
+      return labels[stringValue] ?? stringValue;
+    }
+    if (name === "batter_hand") return stringValue === "L" ? "Left" : stringValue === "R" ? "Right" : stringValue;
+    if (name === "description") return formatDescription(stringValue);
+    if (name === "events") return formatEvent(stringValue);
+    if (name === "base_state") {
+      return stringValue === "bases_empty" ? "Bases Empty" : "Runners On";
+    }
+    if (name === "count_group") {
+      const labels: Record<string, string> = {
+        ahead: "Pitcher Ahead",
+        behind: "Pitcher Behind",
+        even: "Even Count",
+        two_strikes: "Two Strikes",
+        full_count: "Full Count",
+      };
+      return labels[stringValue] ?? stringValue;
+    }
+    if (name === "location_filter") {
+      return stringValue === "zone" ? "In Zone" : "Out of Zone";
+    }
+    if (name === "mode") {
+      return stringValue
+        .split("_")
+        .map((part) => part[0].toUpperCase() + part.slice(1))
+        .join(" ");
+    }
+    if (name === "preset") {
+      return stringValue
+        .split("_")
+        .map((part) => part[0].toUpperCase() + part.slice(1))
+        .join(" ");
+    }
+    if (name === "period_b_to_date") return stringValue === "true" ? "Yes" : "No";
+    return stringValue;
+  }
+
+  function skillArgsToPitchFilters(args: RelaySkillCall["args"]): PitchFilters {
+    const nextFilters: PitchFilters = {};
+    [
+      "pitcher_name",
+      "pitch_type",
+      "pitch_type_group",
+      "season",
+      "min_velocity",
+      "max_velocity",
+      "batter_hand",
+      "description",
+      "events",
+      "base_state",
+      "count_group",
+      "location_filter",
+    ].forEach((key) => {
+      const value = args[key];
+      if (value !== null && value !== undefined && value !== "") {
+        nextFilters[key as keyof PitchFilters] = String(value);
+      }
+    });
+
+    if (args.balls !== null && args.balls !== undefined) nextFilters.balls = String(args.balls);
+    if (args.strikes !== null && args.strikes !== undefined) nextFilters.strikes = String(args.strikes);
+    if (nextFilters.balls && nextFilters.strikes) {
+      nextFilters.count = `${nextFilters.balls}-${nextFilters.strikes}`;
+    }
+
+    return nextFilters;
+  }
+
+  function skillArgsToCompareFilters(args: RelaySkillCall["args"]): Partial<CompareFilters> {
+    const nextFilters: Partial<CompareFilters> = {};
+    ["pitcher_name", "pitch_type", "batter_hand"].forEach((key) => {
+      const value = args[key];
+      if (value !== null && value !== undefined && value !== "") {
+        nextFilters[key as keyof CompareFilters] = String(value);
+      }
+    });
+    return nextFilters;
+  }
+
+  async function handleAskRelay(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const query = askQuery.trim();
+    if (!query) return;
+
+    setIsParsingQuery(true);
+    setAskError(null);
+    setAskNotice(null);
+    try {
+      setSkillCall(await parseNaturalLanguageQuery(query));
+    } catch (error) {
+      setSkillCall(null);
+      setAskError(error instanceof Error ? error.message : "Query parsing failed");
+    } finally {
+      setIsParsingQuery(false);
+    }
+  }
+
+  function isExplorerSkill(skill: RelaySkillCall["skill"]) {
+    return skill !== "compare_pitcher_periods";
+  }
+
+  async function runPitchSearch(searchFilters: PitchFilters, mode: HeatmapMode) {
+    const completedFilters = completePitcherName(searchFilters);
+    const pitcher = selectedPitcherForFilters(completedFilters);
+    if (!pitcher) {
+      setFilters(completedFilters);
+      setSearchError("Choose a cached pitcher before searching.");
+      return;
+    }
+
+    setFilters(completedFilters);
+    setIsSearching(true);
+    setIsHeatmapLoading(true);
+    setSearchError(null);
+
+    try {
+      const queryFilters = pitcherIdQueryFilters(completedFilters);
+      const [response, heatmapResponse] = await Promise.all([
+        searchPitches(queryFilters),
+        getPitchHeatmap(queryFilters, mode),
+      ]);
+      setResults(response.results);
+      setResultCount(response.count);
+      setTotalResultCount(response.total_count);
+      setHeatmap(heatmapResponse);
+      setLastPitchSearchFilters(queryFilters);
+      setAskNotice(null);
+    } catch (error) {
+      setResults([]);
+      setResultCount(0);
+      setTotalResultCount(0);
+      setHeatmap(null);
+      setLastPitchSearchFilters(null);
+      setSearchError(error instanceof Error ? error.message : "Search failed");
+    } finally {
+      setIsSearching(false);
+      setIsHeatmapLoading(false);
+    }
+  }
+
+  async function runCompareSearch(searchFilters: CompareFilters) {
+    setCompareFilters(searchFilters);
+
+    if (!selectedPitcherForFilters(searchFilters)) {
+      setCompareError("Choose a cached pitcher before comparing.");
+      return;
+    }
+
+    if (!searchFilters.a_start || !searchFilters.a_end || !searchFilters.b_start || !searchFilters.b_end) {
+      setCompareError("Choose start and end dates for both periods.");
+      return;
+    }
+
+    setIsComparing(true);
+    setCompareError(null);
+
+    try {
+      const queryFilters = pitcherIdQueryFilters(searchFilters);
+      const response = await comparePitcher(queryFilters, compareHeatmapMode);
+      setComparison(response);
+      setComparePitchTypes(collectPitchTypes(response));
+      setCompareHeatmapA(response.chart_data?.heatmaps.period_a ?? null);
+      setCompareHeatmapB(response.chart_data?.heatmaps.period_b ?? null);
+      setDrilldownPitchType(null);
+      setDrilldownA([]);
+      setDrilldownB([]);
+      setAskNotice(null);
+    } catch (error) {
+      setComparison(null);
+      setCompareHeatmapA(null);
+      setCompareHeatmapB(null);
+      setCompareError(error instanceof Error ? error.message : "Comparison failed");
+    } finally {
+      setIsComparing(false);
+    }
+  }
+
+  async function applySkillCall() {
+    if (!skillCall) return;
+
+    setAskNotice(null);
+    setAskError(null);
+
+    if (skillCall.skill === "compare_pitcher_periods") {
+      setActiveView("compare");
+      const scopedFilters = completePitcherName({
+        ...initialCompareFilters,
+        ...skillArgsToCompareFilters(skillCall.args),
+      });
+      setCompareFilters(scopedFilters);
+      setComparison(null);
+      setComparePitchTypes([]);
+      setCompareHeatmapA(null);
+      setCompareHeatmapB(null);
+      setDrilldownPitchType(null);
+      setDrilldownA([]);
+      setDrilldownB([]);
+      setCompareError(null);
+
+      const preset = skillCall.args.preset ? String(skillCall.args.preset) : "";
+      const periodASeason = Number(skillCall.args.period_a_season);
+      const periodBSeason = Number(skillCall.args.period_b_season);
+      const pitcher = selectedPitcherForFilters(scopedFilters);
+      if (periodASeason && periodBSeason && pitcher && preset !== "previous_current_same_span") {
+        try {
+          const options = await getPitchFilterOptions({
+            pitcher_id: String(pitcher.pitcher),
+            pitcher_name: "",
+          });
+          const seasonFilters = compareFiltersWithSeasonYears(
+            scopedFilters,
+            periodASeason,
+            periodBSeason,
+            options.game_dates,
+          );
+          if (seasonFilters) {
+            await runCompareSearch(seasonFilters);
+            return;
+          }
+          setAskNotice(
+            `Applied the compare scope, but cached data was not available for ${periodASeason} and ${periodBSeason}.`,
+          );
+        } catch (error) {
+          setAskNotice(
+            error instanceof Error
+              ? `Applied the compare scope, but could not load season dates: ${error.message}`
+              : "Applied the compare scope, but could not load season dates.",
+          );
+        }
+        return;
+      }
+      if (preset && pitcher) {
+        try {
+          const options = await getPitchFilterOptions({
+            pitcher_id: String(pitcher.pitcher),
+            pitcher_name: "",
+          });
+          const presetFilters = compareFiltersWithPreset(
+            scopedFilters,
+            preset as ComparePreset,
+            options.game_dates,
+          );
+          if (presetFilters) {
+            await runCompareSearch(presetFilters);
+            return;
+          }
+          setAskNotice(
+            `Applied the compare scope, but ${skillArgDisplayValue("preset", preset)} is not available for this cached pitcher.`,
+          );
+        } catch (error) {
+          setAskNotice(
+            error instanceof Error
+              ? `Applied the compare scope, but could not load preset dates: ${error.message}`
+              : "Applied the compare scope, but could not load preset dates.",
+          );
+        }
+        return;
+      }
+
+      setAskNotice(
+        preset
+          ? `Applied the compare scope. Use the ${skillArgDisplayValue("preset", preset)} preset to fill the periods.`
+          : "Applied the compare scope. Choose the two periods to compare.",
+      );
+      return;
+    }
+
+    const nextHeatmapMode = skillCall.args.mode &&
+      ["all", "whiffs", "hard_contact", "in_zone"].includes(String(skillCall.args.mode))
+        ? (String(skillCall.args.mode) as HeatmapMode)
+        : heatmapMode;
+    const nextFilters: PitchFilters = {
+      ...initialFilters,
+      ...skillArgsToPitchFilters(skillCall.args),
+      pitcher_id: "",
+    };
+
+    setActiveView("explorer");
+    setFilters(nextFilters);
+    setResults([]);
+    setResultCount(0);
+    setTotalResultCount(0);
+    setHeatmap(null);
+    setLastPitchSearchFilters(null);
+    setHeatmapMode(nextHeatmapMode);
+
+    setSearchError(null);
+    await runPitchSearch(nextFilters, nextHeatmapMode);
+  }
+
   function updateFilter(name: keyof PitchFilters, value: string) {
     const [balls, strikes] = value.split("-");
     setFilters((currentFilters) => ({
@@ -995,6 +1505,7 @@ function App() {
             start_date: "",
             end_date: "",
             pitch_type: "",
+            pitch_type_group: "",
             count: "",
             balls: "",
             strikes: "",
@@ -1004,6 +1515,7 @@ function App() {
             description: "",
             events: "",
             base_state: "",
+            count_group: "",
             location_filter: "",
           }
         : {}),
@@ -1013,6 +1525,7 @@ function App() {
         ? {
             balls: value ? balls : "",
             strikes: value ? strikes : "",
+            count_group: "",
           }
         : {}),
     }));
@@ -1059,7 +1572,7 @@ function App() {
             : game.away_team && game.home_team
               ? `${game.away_team} at ${game.home_team}`
               : null,
-          `${game.pitch_count} pitches`,
+          countLabel(game.pitch_count, "pitch"),
         ]
           .filter(Boolean)
           .join(" - "),
@@ -1134,6 +1647,16 @@ function App() {
     if (name === "base_state") {
       return value === "bases_empty" ? "Bases Empty" : "Runners On";
     }
+    if (name === "count_group") {
+      const labels: Record<string, string> = {
+        ahead: "Pitcher Ahead",
+        behind: "Pitcher Behind",
+        even: "Even Count",
+        two_strikes: "Two Strikes",
+        full_count: "Full Count",
+      };
+      return labels[value] ?? value;
+    }
     if (name === "location_filter") {
       return value === "zone" ? "In Zone" : "Out of Zone";
     }
@@ -1142,6 +1665,14 @@ function App() {
     if (name === "single_game") return formatDate(value);
     if (name === "pitcher_name") return formatPersonName(value);
     if (name === "pitch_type") return formatPitchTypeWithCode(value);
+    if (name === "pitch_type_group") {
+      const labels: Record<string, string> = {
+        fastball: "Fastballs",
+        breaking: "Breaking Balls",
+        offspeed: "Offspeed",
+      };
+      return labels[value] ?? value;
+    }
     if (name === "count") return value;
     if (name === "result_order") {
       return filterSelectOptions(name).find((option) => option.value === value)?.label ?? value;
@@ -1150,18 +1681,23 @@ function App() {
   }
 
   function filterLabel(name: keyof PitchFilters) {
+    if (name === "pitch_type_group") return "Pitch Family";
+    if (name === "count_group") return "Count Group";
     return filterFields.find((field) => field.name === name)?.label ?? name;
   }
 
   function activePitchFilters() {
     return Object.entries(filters)
       .filter(
-        (entry): entry is [keyof PitchFilters, string] =>
-          Boolean(entry[1]?.trim()) &&
-          entry[1] !== initialFilters[entry[0] as keyof PitchFilters] &&
+        (entry): entry is [keyof PitchFilters, string] => {
+          const value = entry[1];
+          if (typeof value !== "string") return false;
+          return Boolean(value.trim()) &&
+          value !== initialFilters[entry[0] as keyof PitchFilters] &&
           entry[0] !== "pitcher_id" &&
           entry[0] !== "balls" &&
-          entry[0] !== "strikes",
+          entry[0] !== "strikes";
+        },
       )
       .map(([name, value]) => ({
         name,
@@ -1192,7 +1728,7 @@ function App() {
   function compareFieldLabel(name: keyof CompareFilters) {
     if (name === "pitcher_name") return "Pitcher";
     if (name === "pitcher_id") return "Pitcher ID";
-    if (name === "pitch_type") return "Pitch Type";
+    if (name === "pitch_type") return "Pitch Types";
     if (name === "batter_hand") return "Batter Side";
     if (name === "a_game") return "Period 1 Game";
     if (name === "b_game") return "Period 2 Game";
@@ -1215,6 +1751,11 @@ function App() {
               : value === "R"
                 ? "Right"
                 : value
+            : name === "pitch_type"
+              ? value
+                  .split(",")
+                  .map((pitchType) => formatPitchTypeWithCode(pitchType.trim()))
+                  .join(", ")
             : name === "a_game" || name === "b_game"
               ? formatDate(value)
               : name === "a_start" || name === "a_end" || name === "b_start" || name === "b_end"
@@ -1340,41 +1881,7 @@ function App() {
 
   async function handleSearch(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const searchFilters = completePitcherName(filters);
-    const pitcher = selectedPitcherForFilters(searchFilters);
-    if (!pitcher) {
-      setFilters(searchFilters);
-      setSearchError("Choose a cached pitcher before searching.");
-      return;
-    }
-
-    setFilters(searchFilters);
-    setIsSearching(true);
-    setIsHeatmapLoading(true);
-    setSearchError(null);
-
-    try {
-      const queryFilters = pitcherIdQueryFilters(searchFilters);
-      const [response, heatmapResponse] = await Promise.all([
-        searchPitches(queryFilters),
-        getPitchHeatmap(queryFilters, heatmapMode),
-      ]);
-      setResults(response.results);
-      setResultCount(response.count);
-      setTotalResultCount(response.total_count);
-      setHeatmap(heatmapResponse);
-      setLastPitchSearchFilters(queryFilters);
-    } catch (error) {
-      setResults([]);
-      setResultCount(0);
-      setTotalResultCount(0);
-      setHeatmap(null);
-      setLastPitchSearchFilters(null);
-      setSearchError(error instanceof Error ? error.message : "Search failed");
-    } finally {
-      setIsSearching(false);
-      setIsHeatmapLoading(false);
-    }
+    await runPitchSearch(filters, heatmapMode);
   }
 
   async function updateHeatmapMode(mode: HeatmapMode) {
@@ -1472,41 +1979,7 @@ function App() {
   async function handleCompare(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const searchFilters = completePitcherName(compareFilters);
-    setCompareFilters(searchFilters);
-
-    if (!selectedPitcherForFilters(searchFilters)) {
-      setCompareError("Choose a cached pitcher before comparing.");
-      return;
-    }
-
-    if (!searchFilters.a_start || !searchFilters.a_end || !searchFilters.b_start || !searchFilters.b_end) {
-      setCompareError("Choose start and end dates for both periods.");
-      return;
-    }
-
-    setIsComparing(true);
-    setCompareError(null);
-
-    try {
-      const queryFilters = pitcherIdQueryFilters(searchFilters);
-      const response = await comparePitcher(queryFilters, compareHeatmapMode);
-      setComparison(response);
-      setComparePitchTypes(collectPitchTypes(response));
-      setCompareHeatmapA(response.chart_data?.heatmaps.period_a ?? null);
-      setCompareHeatmapB(response.chart_data?.heatmaps.period_b ?? null);
-      setDrilldownPitchType(null);
-      setDrilldownA([]);
-      setDrilldownB([]);
-    } catch (error) {
-      setComparison(null);
-      setCompareHeatmapA(null);
-      setCompareHeatmapB(null);
-      setCompareError(
-        error instanceof Error ? error.message : "Comparison failed",
-      );
-    } finally {
-      setIsComparing(false);
-    }
+    await runCompareSearch(searchFilters);
   }
 
   const pitchTypes = useMemo(
@@ -1612,6 +2085,30 @@ function App() {
     [compareFilters],
   );
   const dataQualityMetrics = cacheMetadata?.data_quality?.metrics ?? [];
+  const sampleQueries = useMemo(() => {
+    if (pitchers.length === 0) {
+      return ["Search a cached pitcher to get started"];
+    }
+
+    const sortedPitchers = [...pitchers].sort((a, b) => b.pitch_count - a.pitch_count);
+    const pitchTypes = cacheMetadata?.pitch_types ?? [];
+    const firstPitcher = sortedPitchers[0];
+    const secondPitcher = sortedPitchers[1] ?? sortedPitchers[0];
+    const multiSeasonPitcher =
+      sortedPitchers.find(
+        (pitcher) =>
+          dateFromIso(pitcher.first_game_date).getFullYear() !==
+          dateFromIso(pitcher.last_game_date).getFullYear(),
+      ) ?? sortedPitchers[0];
+    const comparePitchPhrase =
+      pitchPhraseFromTypes(pitchTypes, ["CU", "SL", "ST", "KC", "CH", "FF"]) ?? "four seam fastballs";
+
+    return [
+      `${formatPersonName(firstPitcher.player_name)} fastballs over 97 to left handed hitters`,
+      `${formatPersonName(secondPitcher.player_name)} breaking balls with runners on`,
+      `compare ${formatPersonName(multiSeasonPitcher.player_name)} ${comparePitchPhrase} previous season vs current season same span`,
+    ];
+  }, [cacheMetadata?.pitch_types, pitchers]);
 
   function saveCurrentComparison() {
     if (!comparisonName.trim()) return;
@@ -1653,6 +2150,13 @@ function App() {
 
       <nav className="view-tabs" aria-label="Relay views">
         <button
+          className={activeView === "home" ? "view-tab is-active" : "view-tab"}
+          onClick={() => setActiveView("home")}
+          type="button"
+        >
+          Home
+        </button>
+        <button
           className={activeView === "explorer" ? "view-tab is-active" : "view-tab"}
           onClick={() => setActiveView("explorer")}
           type="button"
@@ -1668,6 +2172,72 @@ function App() {
         </button>
       </nav>
       {freshness ? <div className="data-freshness">Cache: {freshness}</div> : null}
+      <section className="home-section" hidden={activeView !== "home"} aria-labelledby="home-title">
+        <div className="home-copy">
+          <h2 id="home-title">Ask Relay</h2>
+          <p>Start with a plain-language baseball question. Relay will translate it into filters, searches, charts, or comparisons.</p>
+        </div>
+        <section className="ask-relay-panel" aria-label="Ask Relay">
+          <form className="ask-relay-form" onSubmit={handleAskRelay}>
+            <label className="ask-relay-field">
+              <span>Question</span>
+              <input
+                value={askQuery}
+                onChange={(event) => setAskQuery(event.target.value)}
+                placeholder="compare Nola curveballs previous season vs current season same span"
+                type="text"
+              />
+            </label>
+            <button className="search-button" disabled={isParsingQuery || !askQuery.trim()} type="submit">
+              {isParsingQuery ? "Parsing..." : "Ask"}
+            </button>
+          </form>
+          <div className="query-examples" aria-label="Example questions">
+            {sampleQueries.map((example) => (
+              <button
+                key={example}
+                type="button"
+                onClick={() => setAskQuery(example)}
+              >
+                {example}
+              </button>
+            ))}
+          </div>
+          {askError ? <div className="error-banner">{askError}</div> : null}
+          {askNotice ? <div className="inline-note">{askNotice}</div> : null}
+          {skillCall ? (
+            <div className="skill-preview">
+              <div className="skill-preview-heading">
+                <div>
+                  <span>Relay Understood</span>
+                  <strong>{skillNameLabel(skillCall.skill)}</strong>
+                </div>
+                <button className="secondary-button" onClick={applySkillCall} type="button">
+                  {isExplorerSkill(skillCall.skill) ? "Apply & Search" : "Apply & Compare"}
+                </button>
+              </div>
+              {Object.keys(skillCall.args).length > 0 ? (
+                <div className="skill-args">
+                  {Object.entries(skillCall.args).map(([name, value]) => (
+                    <span className="skill-arg-chip" key={name}>
+                      {skillArgLabel(name)}: {skillArgDisplayValue(name, value)}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="inline-note">No filters were confidently parsed.</p>
+              )}
+              {skillCall.warnings.length > 0 ? (
+                <div className="skill-warnings">
+                  {skillCall.warnings.map((warning) => (
+                    <span key={warning}>{warning}</span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
+      </section>
       <datalist id="cached-pitchers">
         {pitchers.map((pitcher) => (
           <option key={pitcher.pitcher} value={formatPersonName(pitcher.player_name)} />
@@ -1763,9 +2333,8 @@ function App() {
           pitchTypes,
           comparePitchTypes,
           topUsageDelta,
-          topVelocityDelta,
-          topSpinDelta,
           formatDelta,
+          formatDeltaWithUnit,
           compareHeatmapA,
           compareHeatmapB,
           compareHeatmapMode,
@@ -1774,6 +2343,7 @@ function App() {
           formatDateRange,
           formatRate,
           formatNumber,
+          formatNumberWithUnit,
           drilldownPitchType,
           loadPitchTypeDrilldown,
           isDrilldownLoading,
