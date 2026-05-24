@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.api.errors import raise_service_error
 from app.services.pitch_query_service import (
     get_cache_metadata,
+    get_pitch_data_quality,
     get_pitch_heatmap,
     list_cached_pitchers,
     list_pitch_filter_options,
@@ -197,6 +198,14 @@ def get_pitches(
         "movement": MOVEMENT_METADATA,
         "results": results,
     }
+
+
+@router.get("/pitches/data-quality")
+def get_pitches_data_quality(filters: PitchFilterParams = Depends()) -> dict[str, Any]:
+    try:
+        return get_pitch_data_quality(filters.to_filters())
+    except Exception as exc:
+        raise_service_error(exc)
 
 
 @router.get("/pitches/heatmap")

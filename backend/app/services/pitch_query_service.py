@@ -303,6 +303,67 @@ def search_pitches(
         }
 
 
+def get_pitch_data_quality(
+    filters: dict[str, Any],
+    parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
+) -> dict[str, Any]:
+    where_sql, params = _build_where_clause(filters)
+    contact_condition = (
+        "(bb_type IS NOT NULL OR launch_speed IS NOT NULL OR launch_angle IS NOT NULL "
+        "OR hit_distance_sc IS NOT NULL OR description = 'hit_into_play' OR events IS NOT NULL)"
+    )
+    query = (
+        "SELECT "
+        "count(*) AS pitch_count, "
+        "sum(CASE WHEN plate_x IS NOT NULL AND plate_z IS NOT NULL THEN 1 ELSE 0 END) AS plate_location_available, "
+        "sum(CASE WHEN pfx_x IS NOT NULL AND pfx_z IS NOT NULL THEN 1 ELSE 0 END) AS movement_available, "
+        "sum(CASE WHEN release_spin_rate IS NOT NULL THEN 1 ELSE 0 END) AS spin_available, "
+        "sum(CASE WHEN arm_angle IS NOT NULL THEN 1 ELSE 0 END) AS arm_angle_available, "
+        f"sum(CASE WHEN {contact_condition} THEN 1 ELSE 0 END) AS batted_ball_denominator, "
+        f"sum(CASE WHEN {contact_condition} AND launch_speed IS NOT NULL AND launch_angle IS NOT NULL THEN 1 ELSE 0 END) "
+        "AS batted_ball_available "
+        f"FROM statcast_pitches{where_sql}"
+    )
+
+    with statcast_connection(parquet_path) as connection:
+        row = connection.execute(query, params).fetchone()
+
+    pitch_count = int(row[0] or 0)
+    batted_ball_denominator = int(row[5] or 0)
+    metric_inputs = [
+        ("plate_location", "Plate Location", "all_pitches", pitch_count, int(row[1] or 0)),
+        ("movement", "Movement", "all_pitches", pitch_count, int(row[2] or 0)),
+        ("spin", "Spin", "all_pitches", pitch_count, int(row[3] or 0)),
+        ("arm_angle", "Arm Angle", "all_pitches", pitch_count, int(row[4] or 0)),
+        (
+            "batted_ball",
+            "Batted-Ball Metrics",
+            "balls_in_play",
+            batted_ball_denominator,
+            int(row[6] or 0),
+        ),
+    ]
+
+    metrics = []
+    for key, label, denominator, denominator_count, available_count in metric_inputs:
+        missing_count = max(denominator_count - available_count, 0)
+        metrics.append(
+            {
+                "key": key,
+                "label": label,
+                "denominator": denominator,
+                "denominator_count": denominator_count,
+                "available_count": available_count,
+                "missing_count": missing_count,
+                "available_rate": available_count / denominator_count if denominator_count else None,
+                "missing_rate": missing_count / denominator_count if denominator_count else None,
+                "missing_fields": [],
+            }
+        )
+
+    return {"pitch_count": pitch_count, "metrics": metrics}
+
+
 def get_pitch_heatmap(
     filters: dict[str, Any],
     x_bins: int = 25,

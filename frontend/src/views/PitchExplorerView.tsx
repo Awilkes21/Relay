@@ -9,6 +9,7 @@ type PitchExplorerViewContext = Record<string, any> & {
   activePitchFilterList: any[];
   arsenalSummary: any[];
   dataQualityMetrics: any[];
+  dataQualityPitchCount: number;
   results: any[];
   sortedResults: any[];
 };
@@ -20,7 +21,6 @@ type PitchExplorerViewProps = {
 
 function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
   const {
-    API_URL,
     pitcherError,
     pitchOptionsError,
     selectedExplorerPitcher,
@@ -57,6 +57,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
     formatDescription,
     formatEvent,
     dataQualityMetrics,
+    dataQualityPitchCount,
     explorerFocus,
     lastAppliedQuery,
     focusedResultTarget
@@ -156,7 +157,6 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
       >
         <div className="section-heading">
           <h2 id="pitch-explorer-title">Pitch Explorer</h2>
-          <span>{API_URL}</span>
         </div>
 
         {lastAppliedQuery ? (
@@ -309,15 +309,18 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
 
         {searchError ? <div className="error-banner">{searchError}</div> : null}
 
-        {dataQualityMetrics.length > 0 && shouldShowResult(["data_quality"]) ? (
+        {dataQualityPitchCount > 0 && dataQualityMetrics.length > 0 && shouldShowResult(["data_quality"]) ? (
           <section className="chart-panel data-quality-panel focus-scroll-target" id="relay-data-quality">
             <div className="chart-heading collapsible-heading">
               <div>
                 <h3>Data Quality</h3>
-                <p>Availability for fields Relay uses in charts, movement, and contact views.</p>
+                <p>
+                  Availability across all {countLabel(dataQualityPitchCount, "matching pitch")} for these filters,
+                  independent of the display limit.
+                </p>
               </div>
               <div className="section-actions">
-                <span>Current cache</span>
+                <span>These results</span>
                 <button
                   aria-label={collapsedSections.dataQuality ? "Expand data quality" : "Collapse data quality"}
                   className="disclosure-button"
@@ -408,7 +411,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
             <div className="chart-heading collapsible-heading">
               <h3>Arsenal Summary</h3>
               <div className="section-actions">
-                <span>Current result set</span>
+                <span>These results</span>
                 <button
                   aria-label={collapsedSections.arsenal ? "Expand arsenal summary" : "Collapse arsenal summary"}
                   className="disclosure-button"

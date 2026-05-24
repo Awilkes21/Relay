@@ -28,7 +28,6 @@ type CompareViewProps = {
 
 function CompareView({ hidden, context }: CompareViewProps) {
   const {
-    API_URL,
     handleCompare,
     pitcherError,
     compareDateRange,
@@ -206,7 +205,6 @@ function CompareView({ hidden, context }: CompareViewProps) {
       >
           <div className="section-heading">
             <h2 id="compare-title">Pitcher Compare</h2>
-            <span>{API_URL}</span>
           </div>
 
           {lastAppliedQuery ? (
@@ -219,7 +217,7 @@ function CompareView({ hidden, context }: CompareViewProps) {
           {comparison && !isFocusedResult ? (
             <div className="collapsed-search-bar">
               <div>
-                <span>Comparison Search</span>
+                <span>Comparison Setup</span>
                 <strong>
                   {searchFiltersPitcherName(compareFilters)} |{" "}
                   {formatShortDateRange(comparison.period_a.start, comparison.period_a.end)} vs{" "}
@@ -926,7 +924,7 @@ function CompareView({ hidden, context }: CompareViewProps) {
 
               {shouldShowResult(["table", "comparison_table"]) ? (
               <div className="results-header focus-scroll-target" id="relay-comparison-table">
-                <h3>Pitch-Type Diff</h3>
+                <h3>Pitch Type Changes</h3>
                 <div className="results-header-actions">
                   <span>
                     {formatShortDateRange(comparison.period_b.start, comparison.period_b.end)} minus{" "}

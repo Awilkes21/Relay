@@ -5,6 +5,7 @@ import {
   type CacheMetadataResponse,
   type CompareFilters,
   type HeatmapMode,
+  type DataQualityMetric,
   type PitchHeatmapResponse,
   type PitchFilterOptions,
   type PitcherCompareResponse,
@@ -14,6 +15,7 @@ import {
   type SavedComparison,
   comparePitcher,
   getCacheMetadata,
+  getPitchDataQuality,
   getPitchHeatmap,
   getHealth,
   getPitchFilterOptions,
@@ -23,6 +25,11 @@ import {
 } from "./api";
 import PitchExplorerView from "./views/PitchExplorerView";
 import CompareView from "./views/CompareView";
+import MovementChart from "./components/MovementChart";
+import PitchHeatmap from "./components/PitchHeatmap";
+import StrikeZoneChart from "./components/StrikeZoneChart";
+import CompareMovementChart from "./components/CompareMovementChart";
+import CompareDeltaHeatmap from "./components/CompareDeltaHeatmap";
 import { formatPitchType, formatPitchTypeWithCode } from "./pitchTypes";
 import { countLabel } from "./text";
 import "./App.css";
@@ -46,9 +53,34 @@ type QueryFocusTarget = {
   target: string;
   nonce: number;
 };
-type FocusedAnswer = QueryFocusTarget & {
+type ExplorerAnswerSnapshot = {
+  filters: PitchFilters;
+  results: PitchResult[];
+  resultCount: number;
+  totalResultCount: number;
+  heatmap: PitchHeatmapResponse | null;
+  heatmapMode: HeatmapMode;
+  dataQualityMetrics: DataQualityMetric[];
+  dataQualityPitchCount: number;
+};
+
+type CompareAnswerSnapshot = {
+  filters: CompareFilters;
+  comparison: PitcherCompareResponse | null;
+  heatmapA: PitchHeatmapResponse | null;
+  heatmapB: PitchHeatmapResponse | null;
+  heatmapMode: HeatmapMode;
+  visiblePitchTypes: string[];
+};
+
+type HomeAnswer = {
+  id: string;
   view: "explorer" | "compare";
+  target: string;
   query: string;
+  createdAt: number;
+  explorer?: ExplorerAnswerSnapshot;
+  compare?: CompareAnswerSnapshot;
 };
 type SortDirection = "asc" | "desc";
 type PitchSortKey =
@@ -320,6 +352,16 @@ function formatRate(value: number | null | undefined) {
   return value === null || value === undefined ? "-" : `${(value * 100).toFixed(1)}%`;
 }
 
+function formatQualityRate(value: number | null | undefined) {
+  if (value === null || value === undefined) return "-";
+  const percent = value * 100;
+  if (percent === 0 || percent === 100) return `${percent.toFixed(0)}%`;
+  if (percent < 0.1) return "<0.1%";
+  if (percent > 99.9) return ">99.9%";
+  if (percent < 1 || percent > 99) return `${percent.toFixed(1)}%`;
+  return `${percent.toFixed(0)}%`;
+}
+
 function formatDelta(value: number | null | undefined, kind: "rate" | "number") {
   if (value === null || value === undefined) return "-";
   const sign = value > 0 ? "+" : "";
@@ -570,6 +612,8 @@ function App() {
   const [totalResultCount, setTotalResultCount] = useState(0);
   const [heatmap, setHeatmap] = useState<PitchHeatmapResponse | null>(null);
   const [heatmapMode, setHeatmapMode] = useState<HeatmapMode>("all");
+  const [resultDataQualityMetrics, setResultDataQualityMetrics] = useState<DataQualityMetric[]>([]);
+  const [dataQualityPitchCount, setDataQualityPitchCount] = useState(0);
   const [lastPitchSearchFilters, setLastPitchSearchFilters] = useState<PitchFilters | null>(null);
   const [isHeatmapLoading, setIsHeatmapLoading] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -611,7 +655,9 @@ function App() {
   const [lastAppliedQuery, setLastAppliedQuery] = useState("");
   const [explorerFocus, setExplorerFocus] = useState<QueryFocusTarget | null>(null);
   const [compareFocus, setCompareFocus] = useState<QueryFocusTarget | null>(null);
-  const [focusedAnswer, setFocusedAnswer] = useState<FocusedAnswer | null>(null);
+  const [homeAnswers, setHomeAnswers] = useState<HomeAnswer[]>([]);
+  const [collapsedHomeAnswers, setCollapsedHomeAnswers] = useState<Record<string, boolean>>({});
+  const [homeHeatmapLoading, setHomeHeatmapLoading] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let isMounted = true;
@@ -1190,7 +1236,7 @@ function App() {
       movement_diff: "Movement Diff",
       location_delta: "Delta Heatmap",
       table: "Pitch Table",
-      comparison_table: "Pitch-Type Diff Table",
+      comparison_table: "Pitch Type Changes Table",
       period_tables: "Period Tables",
       period_heatmaps: "Period Heatmaps",
       drilldown: "Drilldown",
@@ -1371,13 +1417,101 @@ function App() {
     }
   }
 
-  async function runPitchSearch(searchFilters: PitchFilters, mode: HeatmapMode) {
+  function appendHomeAnswer(answer: Omit<HomeAnswer, "id" | "createdAt">) {
+    setHomeAnswers((current) => [
+      ...current,
+      {
+        ...answer,
+        id: crypto.randomUUID(),
+        createdAt: Date.now(),
+      },
+    ]);
+  }
+
+  function removeHomeAnswer(answerId: string) {
+    setHomeAnswers((current) => current.filter((answer) => answer.id !== answerId));
+    setCollapsedHomeAnswers((current) => {
+      const next = { ...current };
+      delete next[answerId];
+      return next;
+    });
+  }
+
+  function toggleHomeAnswer(answerId: string) {
+    setCollapsedHomeAnswers((current) => ({
+      ...current,
+      [answerId]: !current[answerId],
+    }));
+  }
+
+  function updateHomeAnswer(answerId: string, updater: (answer: HomeAnswer) => HomeAnswer) {
+    setHomeAnswers((current) =>
+      current.map((answer) => (answer.id === answerId ? updater(answer) : answer)),
+    );
+  }
+
+  async function updateHomeExplorerHeatmap(answer: HomeAnswer, mode: HeatmapMode) {
+    if (!answer.explorer) return;
+
+    setHomeHeatmapLoading((current) => ({ ...current, [answer.id]: true }));
+    try {
+      const heatmapResponse = await getPitchHeatmap(answer.explorer.filters, mode);
+      updateHomeAnswer(answer.id, (currentAnswer) =>
+        currentAnswer.explorer
+          ? {
+              ...currentAnswer,
+              explorer: {
+                ...currentAnswer.explorer,
+                heatmap: heatmapResponse,
+                heatmapMode: mode,
+              },
+            }
+          : currentAnswer,
+      );
+    } catch (error) {
+      setAskNotice(error instanceof Error ? error.message : "Heatmap failed");
+    } finally {
+      setHomeHeatmapLoading((current) => ({ ...current, [answer.id]: false }));
+    }
+  }
+
+  async function updateHomeCompareHeatmaps(answer: HomeAnswer, mode: HeatmapMode) {
+    const snapshot = answer.compare;
+    if (!snapshot) return;
+
+    setHomeHeatmapLoading((current) => ({ ...current, [answer.id]: true }));
+    try {
+      const [periodA, periodB] = await Promise.all([
+        getPitchHeatmap(comparePeriodPitchFilters(snapshot.filters, "a"), mode),
+        getPitchHeatmap(comparePeriodPitchFilters(snapshot.filters, "b"), mode),
+      ]);
+      updateHomeAnswer(answer.id, (currentAnswer) =>
+        currentAnswer.compare
+          ? {
+              ...currentAnswer,
+              compare: {
+                ...currentAnswer.compare,
+                heatmapA: periodA,
+                heatmapB: periodB,
+                heatmapMode: mode,
+              },
+            }
+          : currentAnswer,
+      );
+    } catch (error) {
+      setAskNotice(error instanceof Error ? error.message : "Compare heatmaps failed");
+    } finally {
+      setHomeHeatmapLoading((current) => ({ ...current, [answer.id]: false }));
+    }
+  }
+
+  async function runPitchSearch(searchFilters: PitchFilters, mode: HeatmapMode): Promise<ExplorerAnswerSnapshot | null> {
     const completedFilters = completePitcherName(searchFilters);
     const pitcher = selectedPitcherForFilters(completedFilters);
     if (!pitcher) {
       setFilters(completedFilters);
       setSearchError("Choose a cached pitcher before searching.");
-      return;
+      return null;
     }
 
     setFilters(completedFilters);
@@ -1387,40 +1521,56 @@ function App() {
 
     try {
       const queryFilters = pitcherIdQueryFilters(completedFilters);
-      const [response, heatmapResponse] = await Promise.all([
+      const [response, heatmapResponse, dataQualityResponse] = await Promise.all([
         searchPitches(queryFilters),
         getPitchHeatmap(queryFilters, mode),
+        getPitchDataQuality(queryFilters),
       ]);
       setResults(response.results);
       setResultCount(response.count);
       setTotalResultCount(response.total_count);
       setHeatmap(heatmapResponse);
+      setResultDataQualityMetrics(dataQualityResponse.metrics);
+      setDataQualityPitchCount(dataQualityResponse.pitch_count);
       setLastPitchSearchFilters(queryFilters);
       setAskNotice(null);
+      return {
+        filters: queryFilters,
+        results: response.results,
+        resultCount: response.count,
+        totalResultCount: response.total_count,
+        heatmap: heatmapResponse,
+        heatmapMode: mode,
+        dataQualityMetrics: dataQualityResponse.metrics,
+        dataQualityPitchCount: dataQualityResponse.pitch_count,
+      };
     } catch (error) {
       setResults([]);
       setResultCount(0);
       setTotalResultCount(0);
       setHeatmap(null);
+      setResultDataQualityMetrics([]);
+      setDataQualityPitchCount(0);
       setLastPitchSearchFilters(null);
       setSearchError(error instanceof Error ? error.message : "Search failed");
+      return null;
     } finally {
       setIsSearching(false);
       setIsHeatmapLoading(false);
     }
   }
 
-  async function runCompareSearch(searchFilters: CompareFilters) {
-    setCompareFilters(searchFilters);
+  async function runCompareSearch(searchFilters: CompareFilters): Promise<CompareAnswerSnapshot | null> {
+      setCompareFilters(searchFilters);
 
     if (!selectedPitcherForFilters(searchFilters)) {
       setCompareError("Choose a cached pitcher before comparing.");
-      return;
+      return null;
     }
 
     if (!searchFilters.a_start || !searchFilters.a_end || !searchFilters.b_start || !searchFilters.b_end) {
       setCompareError("Choose start and end dates for both periods.");
-      return;
+      return null;
     }
 
     setIsComparing(true);
@@ -1429,19 +1579,29 @@ function App() {
     try {
       const queryFilters = pitcherIdQueryFilters(searchFilters);
       const response = await comparePitcher(queryFilters, compareHeatmapMode);
+      const nextPitchTypes = collectPitchTypes(response);
       setComparison(response);
-      setComparePitchTypes(collectPitchTypes(response));
+      setComparePitchTypes(nextPitchTypes);
       setCompareHeatmapA(response.chart_data?.heatmaps.period_a ?? null);
       setCompareHeatmapB(response.chart_data?.heatmaps.period_b ?? null);
       setDrilldownPitchType(null);
       setDrilldownA([]);
       setDrilldownB([]);
       setAskNotice(null);
+      return {
+        filters: queryFilters,
+        comparison: response,
+        heatmapA: response.chart_data?.heatmaps.period_a ?? null,
+        heatmapB: response.chart_data?.heatmaps.period_b ?? null,
+        heatmapMode: compareHeatmapMode,
+        visiblePitchTypes: nextPitchTypes,
+      };
     } catch (error) {
       setComparison(null);
       setCompareHeatmapA(null);
       setCompareHeatmapB(null);
       setCompareError(error instanceof Error ? error.message : "Comparison failed");
+      return null;
     } finally {
       setIsComparing(false);
     }
@@ -1490,9 +1650,9 @@ function App() {
             options.game_dates,
           );
           if (seasonFilters) {
-            await runCompareSearch(seasonFilters);
-            if (shouldFocusAnswer) {
-              setFocusedAnswer({ view: "compare", target: focus, query: queryText, nonce: Date.now() });
+            const snapshot = await runCompareSearch(seasonFilters);
+            if (shouldFocusAnswer && snapshot) {
+              appendHomeAnswer({ view: "compare", target: focus, query: queryText, compare: snapshot });
             } else {
               triggerCompareFocus("summary");
             }
@@ -1522,9 +1682,9 @@ function App() {
             options.game_dates,
           );
           if (presetFilters) {
-            await runCompareSearch(presetFilters);
-            if (shouldFocusAnswer) {
-              setFocusedAnswer({ view: "compare", target: focus, query: queryText, nonce: Date.now() });
+            const snapshot = await runCompareSearch(presetFilters);
+            if (shouldFocusAnswer && snapshot) {
+              appendHomeAnswer({ view: "compare", target: focus, query: queryText, compare: snapshot });
             } else {
               triggerCompareFocus("summary");
             }
@@ -1548,11 +1708,7 @@ function App() {
           ? `Applied the compare scope. Use the ${skillArgDisplayValue("preset", preset)} preset to fill the periods.`
           : "Applied the compare scope. Choose the two periods to compare.",
       );
-      if (shouldFocusAnswer) {
-        setFocusedAnswer({ view: "compare", target: focus, query: queryText, nonce: Date.now() });
-      } else {
-        triggerCompareFocus(focus);
-      }
+      triggerCompareFocus(focus);
       return;
     }
 
@@ -1578,9 +1734,9 @@ function App() {
     setHeatmapMode(nextHeatmapMode);
 
     setSearchError(null);
-    await runPitchSearch(nextFilters, nextHeatmapMode);
-    if (shouldFocusAnswer) {
-      setFocusedAnswer({ view: "explorer", target: explorerTarget, query: queryText, nonce: Date.now() });
+    const snapshot = await runPitchSearch(nextFilters, nextHeatmapMode);
+    if (shouldFocusAnswer && snapshot) {
+      appendHomeAnswer({ view: "explorer", target: explorerTarget, query: queryText, explorer: snapshot });
     } else {
       triggerExplorerFocus(explorerTarget);
     }
@@ -1815,6 +1971,8 @@ function App() {
     setResultCount(0);
     setTotalResultCount(0);
     setHeatmap(null);
+    setResultDataQualityMetrics([]);
+    setDataQualityPitchCount(0);
     setLastPitchSearchFilters(null);
     setSearchError(null);
   }
@@ -2178,7 +2336,6 @@ function App() {
     () => activeCompareFilters(),
     [compareFilters],
   );
-  const dataQualityMetrics = cacheMetadata?.data_quality?.metrics ?? [];
   const sampleQueries = useMemo(() => {
     if (pitchers.length === 0) {
       return ["Search a cached pitcher to get started"];
@@ -2203,6 +2360,241 @@ function App() {
       `compare ${formatPersonName(multiSeasonPitcher.player_name)} ${comparePitchPhrase} previous season vs current season same span`,
     ];
   }, [cacheMetadata?.pitch_types, pitchers]);
+
+  function openHomeAnswer(answer: HomeAnswer) {
+    if (answer.view === "explorer" && answer.explorer) {
+      setFilters(answer.explorer.filters);
+      setResults(answer.explorer.results);
+      setResultCount(answer.explorer.resultCount);
+      setTotalResultCount(answer.explorer.totalResultCount);
+      setHeatmap(answer.explorer.heatmap);
+      setHeatmapMode(answer.explorer.heatmapMode);
+      setResultDataQualityMetrics(answer.explorer.dataQualityMetrics);
+      setDataQualityPitchCount(answer.explorer.dataQualityPitchCount);
+      setLastPitchSearchFilters(answer.explorer.filters);
+      setLastAppliedQuery(answer.query);
+      setExplorerFocus({ target: answer.target, nonce: Date.now() });
+      setActiveView("explorer");
+      return;
+    }
+
+    if (answer.view === "compare" && answer.compare) {
+      setCompareFilters(answer.compare.filters);
+      setComparison(answer.compare.comparison);
+      setCompareHeatmapA(answer.compare.heatmapA);
+      setCompareHeatmapB(answer.compare.heatmapB);
+      setCompareHeatmapMode(answer.compare.heatmapMode);
+      setComparePitchTypes(answer.compare.visiblePitchTypes);
+      setLastAppliedQuery(answer.query);
+      setCompareFocus({ target: answer.target, nonce: Date.now() });
+      setActiveView("compare");
+    }
+  }
+
+  function renderHomeExplorerAnswer(answer: HomeAnswer) {
+    const snapshot = answer.explorer;
+    if (!snapshot) return null;
+
+    if (snapshot.results.length === 0) {
+      return (
+        <div className="empty-state">
+          <p>No pitches matched this query. Try removing or modifying some filters.</p>
+        </div>
+      );
+    }
+
+    if (answer.target === "heatmap") {
+      return (
+        <PitchHeatmap
+          heatmap={snapshot.heatmap}
+          mode={snapshot.heatmapMode}
+          isLoading={Boolean(homeHeatmapLoading[answer.id])}
+          onModeChange={(mode) => updateHomeExplorerHeatmap(answer, mode)}
+          pitcherHand={snapshot.results.find((pitch) => pitch.p_throws)?.p_throws}
+          collapsible={false}
+        />
+      );
+    }
+
+    if (answer.target === "strike_zone") {
+      return <StrikeZoneChart pitches={snapshot.results} />;
+    }
+
+    if (answer.target === "movement") {
+      return <MovementChart pitches={snapshot.results} />;
+    }
+
+    if (answer.target === "data_quality") {
+      return (
+        <section className="chart-panel data-quality-panel">
+          <div className="chart-heading">
+            <div>
+              <h3>Data Quality</h3>
+              <p>
+                Availability across all {countLabel(snapshot.dataQualityPitchCount, "matching pitch")} for these filters,
+                independent of the display limit.
+              </p>
+            </div>
+          </div>
+          <div className="data-quality-grid">
+            {snapshot.dataQualityMetrics.map((metric) => (
+              <div className="data-quality-card" key={metric.key}>
+                <span>{metric.label}</span>
+                <strong>{formatQualityRate(metric.available_rate)}</strong>
+                <small>
+                  {metric.available_count} of {metric.denominator_count}{" "}
+                  {metric.denominator === "balls_in_play" ? "BIP" : "pitches"} available
+                </small>
+                <small>{formatQualityRate(metric.missing_rate)} missing</small>
+              </div>
+            ))}
+          </div>
+        </section>
+      );
+    }
+
+    if (answer.target === "table") {
+      return (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Pitcher</th>
+                <th>Batter</th>
+                <th>Type</th>
+                <th>Velocity (mph)</th>
+                <th>Spin (rpm)</th>
+                <th>Count</th>
+                <th>Description</th>
+                <th>Events</th>
+              </tr>
+            </thead>
+            <tbody>
+              {snapshot.results.slice(0, 50).map((pitch, index) => (
+                <tr key={`${answer.id}-${pitch.game_date}-${index}`}>
+                  <td>{formatDate(pitch.game_date)}</td>
+                  <td>{formatPersonName(pitch.player_name)}</td>
+                  <td>{formatBatter(pitch)}</td>
+                  <td>{formatPitchType(pitch.pitch_type)}</td>
+                  <td>{formatNumber(pitch.release_speed)}</td>
+                  <td>{formatNumber(pitch.release_spin_rate, 0)}</td>
+                  <td>{pitch.balls ?? ""}-{pitch.strikes ?? ""}</td>
+                  <td>{formatDescription(pitch.description)}</td>
+                  <td>{formatEvent(pitch.events)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    return (
+      <div className="results-header">
+        <h3>Results</h3>
+        <span>
+          {snapshot.totalResultCount > snapshot.resultCount
+            ? `Showing ${snapshot.resultCount} of ${countLabel(snapshot.totalResultCount, "pitch")}`
+            : countLabel(snapshot.resultCount, "pitch")}
+        </span>
+      </div>
+    );
+  }
+
+  function renderHomeCompareAnswer(answer: HomeAnswer) {
+    const snapshot = answer.compare;
+    const comparison = snapshot?.comparison;
+    if (!snapshot || !comparison) {
+      return (
+        <div className="empty-state">
+          <p>No comparison matched this query. Try removing or modifying some filters.</p>
+        </div>
+      );
+    }
+
+    if (answer.target === "movement" || answer.target === "movement_diff") {
+      return (
+        <CompareMovementChart
+          comparison={comparison}
+          visiblePitchTypes={snapshot.visiblePitchTypes}
+          periodALabel={`Period 1 (${formatShortDateRange(comparison.period_a.start, comparison.period_a.end)})`}
+          periodBLabel={`Period 2 (${formatShortDateRange(comparison.period_b.start, comparison.period_b.end)})`}
+        />
+      );
+    }
+
+    if (answer.target === "heatmap" || answer.target === "period_heatmaps") {
+      return (
+        <div className="comparison-panels">
+          <PitchHeatmap
+            collapsible={false}
+            heatmap={snapshot.heatmapA}
+            mode={snapshot.heatmapMode}
+            isLoading={Boolean(homeHeatmapLoading[answer.id])}
+            onModeChange={(mode) => updateHomeCompareHeatmaps(answer, mode)}
+            pitcherHand={comparison.pitcher_hand}
+            subtitle={formatDateRange(comparison.period_a.start, comparison.period_a.end)}
+            title="Period 1 Heatmap"
+          />
+          <PitchHeatmap
+            collapsible={false}
+            heatmap={snapshot.heatmapB}
+            mode={snapshot.heatmapMode}
+            isLoading={Boolean(homeHeatmapLoading[answer.id])}
+            onModeChange={(mode) => updateHomeCompareHeatmaps(answer, mode)}
+            pitcherHand={comparison.pitcher_hand}
+            subtitle={formatDateRange(comparison.period_b.start, comparison.period_b.end)}
+            title="Period 2 Heatmap"
+          />
+        </div>
+      );
+    }
+
+    if (answer.target === "location_delta") {
+      return (
+        <CompareDeltaHeatmap
+          periodA={snapshot.heatmapA}
+          periodB={snapshot.heatmapB}
+          isLoading={false}
+          periodAStart={comparison.period_a.start}
+          periodAEnd={comparison.period_a.end}
+          periodBStart={comparison.period_b.start}
+          periodBEnd={comparison.period_b.end}
+          pitcherHand={comparison.pitcher_hand}
+          pitchType={snapshot.filters.pitch_type}
+          batterHand={snapshot.filters.batter_hand}
+        />
+      );
+    }
+
+    return (
+      <div className="comparison-summary">
+        <div className="metric-card">
+          <span>Pitch Count</span>
+          <strong>{formatDelta(comparison.deltas.pitch_count, "number")}</strong>
+        </div>
+        <div className="metric-card">
+          <span>Strike Rate</span>
+          <strong>{formatDelta(comparison.deltas.strike_rate, "rate")}</strong>
+        </div>
+        <div className="metric-card">
+          <span>Whiff Rate</span>
+          <strong>{formatDelta(comparison.deltas.whiff_rate, "rate")}</strong>
+        </div>
+        <div className="metric-card">
+          <span>Zone Rate</span>
+          <strong>{formatDelta(comparison.deltas.zone_rate, "rate")}</strong>
+        </div>
+      </div>
+    );
+  }
+
+  function renderHomeAnswerContent(answer: HomeAnswer) {
+    return answer.view === "compare"
+      ? renderHomeCompareAnswer(answer)
+      : renderHomeExplorerAnswer(answer);
+  }
 
   function saveCurrentComparison() {
     if (!comparisonName.trim()) return;
@@ -2255,7 +2647,6 @@ function App() {
         <button
           className={activeView === "explorer" ? "view-tab is-active" : "view-tab"}
           onClick={() => {
-            setFocusedAnswer(null);
             setActiveView("explorer");
           }}
           type="button"
@@ -2265,7 +2656,6 @@ function App() {
         <button
           className={activeView === "compare" ? "view-tab is-active" : "view-tab"}
           onClick={() => {
-            setFocusedAnswer(null);
             setActiveView("compare");
           }}
           type="button"
@@ -2286,7 +2676,7 @@ function App() {
               <input
                 value={askQuery}
                 onChange={(event) => setAskQuery(event.target.value)}
-                placeholder="compare Nola curveballs previous season vs current season same span"
+                placeholder="Skenes fastballs over 97 as a heatmap"
                 type="text"
               />
             </label>
@@ -2318,7 +2708,7 @@ function App() {
             <div className="skill-preview">
               <div className="skill-preview-heading">
                 <div>
-                  <span>Relay Understood</span>
+                  <span>Ready to Show</span>
                   <strong>{skillNameLabel(skillCall.skill)}</strong>
                 </div>
                 <button className="secondary-button" onClick={applySkillCall} type="button">
@@ -2339,24 +2729,54 @@ function App() {
             </div>
           ) : null}
         </section>
-        {focusedAnswer ? (
-          <section className="focused-answer-header" aria-label="Focused query result">
-            <div>
-              <span>Showing</span>
-              <strong>{focusLabel(focusedAnswer.target)}</strong>
-            </div>
-            <p>{focusedAnswer.query}</p>
-            <button
-              className="secondary-button"
-              onClick={() => {
-                const nextView = focusedAnswer.view;
-                setFocusedAnswer(null);
-                setActiveView(nextView);
-              }}
-              type="button"
-            >
-              Open Full {focusedAnswer.view === "compare" ? "Compare" : "Explorer"}
-            </button>
+        {homeAnswers.length > 0 ? (
+          <section className="home-answer-stack" aria-label="Relay answers">
+            {homeAnswers.map((answer) => {
+              const isCollapsed = Boolean(collapsedHomeAnswers[answer.id]);
+              return (
+                <article className="home-answer-card" key={answer.id}>
+                  <header className="focused-answer-header">
+                    <button
+                      aria-label={isCollapsed ? "Expand answer" : "Collapse answer"}
+                      className="disclosure-button"
+                      onClick={() => toggleHomeAnswer(answer.id)}
+                      title={isCollapsed ? "Expand" : "Collapse"}
+                      type="button"
+                    >
+                      {isCollapsed ? ">" : "v"}
+                    </button>
+                    <div>
+                      <span>Showing</span>
+                      <strong>{focusLabel(answer.target)}</strong>
+                    </div>
+                    <p>
+                      <span>You asked:</span> {answer.query}
+                    </p>
+                    <div className="focused-answer-actions">
+                      <button
+                        className="secondary-button"
+                        onClick={() => openHomeAnswer(answer)}
+                        type="button"
+                      >
+                        Open Full {answer.view === "compare" ? "Compare" : "Explorer"}
+                      </button>
+                      <button
+                        aria-label={`Remove ${focusLabel(answer.target)} answer`}
+                        className="icon-action-button"
+                        onClick={() => removeHomeAnswer(answer.id)}
+                        title="Remove answer"
+                        type="button"
+                      >
+                        x
+                      </button>
+                    </div>
+                  </header>
+                  <div className="home-answer-content" hidden={isCollapsed}>
+                    {renderHomeAnswerContent(answer)}
+                  </div>
+                </article>
+              );
+            })}
           </section>
         ) : null}
       </section>
@@ -2377,7 +2797,7 @@ function App() {
       </datalist>
 
       <PitchExplorerView
-        hidden={activeView !== "explorer" && !(activeView === "home" && focusedAnswer?.view === "explorer")}
+        hidden={activeView !== "explorer"}
         context={{
           API_URL,
           pitcherError,
@@ -2415,17 +2835,16 @@ function App() {
           formatBreak,
           formatDescription,
           formatEvent,
-          dataQualityMetrics,
+          dataQualityMetrics: resultDataQualityMetrics,
+          dataQualityPitchCount,
           explorerFocus,
           lastAppliedQuery: activeView === "explorer" ? lastAppliedQuery : "",
-          focusedResultTarget: activeView === "home" && focusedAnswer?.view === "explorer"
-            ? focusedAnswer.target
-            : ""
+          focusedResultTarget: ""
         }}
       />
 
       <CompareView
-        hidden={activeView !== "compare" && !(activeView === "home" && focusedAnswer?.view === "compare")}
+        hidden={activeView !== "compare"}
         context={{
           API_URL,
           handleCompare,
@@ -2487,9 +2906,7 @@ function App() {
           formatEvent,
           compareFocus,
           lastAppliedQuery: activeView === "compare" ? lastAppliedQuery : "",
-          focusedResultTarget: activeView === "home" && focusedAnswer?.view === "compare"
-            ? focusedAnswer.target
-            : ""
+          focusedResultTarget: ""
         }}
       />
     </main>

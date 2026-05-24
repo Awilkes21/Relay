@@ -122,6 +122,11 @@ export type CacheMetadataResponse = {
   };
 };
 
+export type PitchDataQualityResponse = {
+  pitch_count: number;
+  metrics: DataQualityMetric[];
+};
+
 export type PitchFilterOptions = {
   seasons: number[];
   game_dates: Array<{
@@ -362,6 +367,36 @@ export async function searchPitches(filters: PitchFilters): Promise<PitchSearchR
 
   if (!response.ok) {
     throw new Error(await responseError(response, `Pitch search returned ${response.status}`));
+  }
+
+  return response.json();
+}
+
+export async function getPitchDataQuality(
+  filters: PitchFilters,
+): Promise<PitchDataQualityResponse> {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    const trimmedValue = Array.isArray(value) ? value.filter(Boolean).join(",") : value?.trim();
+    if (
+      trimmedValue &&
+      key !== "single_game" &&
+      key !== "count" &&
+      key !== "result_order" &&
+      key !== "limit"
+    ) {
+      params.set(key, trimmedValue);
+    }
+  });
+
+  const queryString = params.toString();
+  const response = await fetch(
+    `${API_URL}/pitches/data-quality${queryString ? `?${queryString}` : ""}`,
+  );
+
+  if (!response.ok) {
+    throw new Error(await responseError(response, `Pitch data quality returned ${response.status}`));
   }
 
   return response.json();
