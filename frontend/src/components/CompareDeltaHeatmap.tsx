@@ -349,13 +349,35 @@ function CompareDeltaHeatmap({
   }, [baseHeatmap, deltaCells, maxAbsDelta]);
 
   useEffect(() => {
+    let frameId: number | null = null;
+    let timeoutId: number | null = null;
+
     function redrawForTheme() {
-      if (!canvasRef.current || !baseHeatmap) return;
-      drawDeltaCanvas(canvasRef.current, baseHeatmap, deltaCells, maxAbsDelta);
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+
+      frameId = window.requestAnimationFrame(() => {
+        timeoutId = window.setTimeout(() => {
+          if (!canvasRef.current || !baseHeatmap) return;
+          drawDeltaCanvas(canvasRef.current, baseHeatmap, deltaCells, maxAbsDelta);
+        }, 0);
+      });
     }
 
     window.addEventListener("relay-theme-change", redrawForTheme);
-    return () => window.removeEventListener("relay-theme-change", redrawForTheme);
+    return () => {
+      window.removeEventListener("relay-theme-change", redrawForTheme);
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
   }, [baseHeatmap, deltaCells, maxAbsDelta]);
 
   function updateHover(event: PointerEvent<SVGSVGElement>) {

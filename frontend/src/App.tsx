@@ -784,7 +784,12 @@ function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     window.localStorage.setItem("relay.theme", theme);
-    window.dispatchEvent(new CustomEvent("relay-theme-change"));
+
+    const timeoutId = window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("relay-theme-change"));
+    }, 160);
+
+    return () => window.clearTimeout(timeoutId);
   }, [theme]);
 
   useEffect(() => {

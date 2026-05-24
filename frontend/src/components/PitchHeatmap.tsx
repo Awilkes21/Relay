@@ -382,13 +382,35 @@ function PitchHeatmap({
   }, [heatmap, mode]);
 
   useEffect(() => {
+    let frameId: number | null = null;
+    let timeoutId: number | null = null;
+
     function redrawForTheme() {
-      if (!canvasRef.current || !heatmap) return;
-      drawHeatmapCanvas(canvasRef.current, heatmap, mode);
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+
+      frameId = window.requestAnimationFrame(() => {
+        timeoutId = window.setTimeout(() => {
+          if (!canvasRef.current || !heatmap) return;
+          drawHeatmapCanvas(canvasRef.current, heatmap, mode);
+        }, 0);
+      });
     }
 
     window.addEventListener("relay-theme-change", redrawForTheme);
-    return () => window.removeEventListener("relay-theme-change", redrawForTheme);
+    return () => {
+      window.removeEventListener("relay-theme-change", redrawForTheme);
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
   }, [heatmap, mode]);
 
   useEffect(() => {
