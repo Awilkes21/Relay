@@ -219,7 +219,7 @@ function MovementChart({ pitches }: MovementChartProps) {
             title={isCollapsed ? "Expand" : "Collapse"}
             type="button"
           >
-            {isCollapsed ? ">" : "v"}
+            {isCollapsed ? "+" : "-"}
           </button>
         </div>
       </div>
@@ -232,12 +232,12 @@ function MovementChart({ pitches }: MovementChartProps) {
           </span>
           <button
             aria-label={isExpanded ? "Collapse expanded movement chart" : "Expand movement chart"}
-            className="icon-action-button"
+            className="secondary-button compact-action-button"
             onClick={() => setIsExpanded((current) => !current)}
             title={isExpanded ? "Collapse" : "Expand"}
             type="button"
           >
-            {isExpanded ? "×" : "⛶"}
+            {isExpanded ? "Exit" : "Expand"}
           </button>
         </div>
         <div className="strike-zone-toolbar-row strike-zone-toolbar-row--secondary">

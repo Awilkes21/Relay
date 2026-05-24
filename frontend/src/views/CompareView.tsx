@@ -67,7 +67,6 @@ function CompareView({ hidden, context }: CompareViewProps) {
     compareHeatmapMode,
     isCompareHeatmapLoading,
     updateCompareHeatmapMode,
-    formatDateRange,
     formatRate,
     formatNumber,
     formatNumberWithUnit,
@@ -99,6 +98,7 @@ function CompareView({ hidden, context }: CompareViewProps) {
     diffTable: false,
     drilldownPitches: true,
   });
+  const sampleTableRowCount = 25;
 
   useEffect(() => {
     if (comparison) {
@@ -149,11 +149,26 @@ function CompareView({ hidden, context }: CompareViewProps) {
   }
 
   function disclosureIcon(isCollapsed: boolean) {
-    return isCollapsed ? ">" : "v";
+    return isCollapsed ? "+" : "-";
   }
 
   function shouldShowResult(targets: string[]) {
     return !isFocusedResult || targets.includes(focusedResultTarget);
+  }
+
+  function paddedPitchSamples(pitches: any[]) {
+    const samples = pitches.slice(0, sampleTableRowCount);
+    return [
+      ...samples,
+      ...Array.from(
+        { length: Math.max(sampleTableRowCount - samples.length, 0) },
+        (_unused, index) => ({
+          empty: true,
+          first: index === 0,
+          loadedCount: samples.length,
+        }),
+      ),
+    ];
   }
 
   const selectedScopePitchTypes = compareFilters.pitch_type
@@ -464,7 +479,7 @@ function CompareView({ hidden, context }: CompareViewProps) {
                     type="button"
                     onClick={() => removeCompareFilter(filter.name)}
                   >
-                    {filter.label}: {filter.value} x
+                    {filter.label}: {filter.value} Clear
                   </button>
                 ))}
               </div>
@@ -490,11 +505,11 @@ function CompareView({ hidden, context }: CompareViewProps) {
               <div className="compare-result-header">
                 <div>
                   <h3>
-                    {formatShortDateRange(comparison.period_b.start, comparison.period_b.end)} vs{" "}
-                    {formatShortDateRange(comparison.period_a.start, comparison.period_a.end)}
+                    {searchFiltersPitcherName(compareFilters)}
                   </h3>
                   <p>
-                    Period 2 minus Period 1 for {searchFiltersPitcherName(compareFilters)}
+                    Period 2 ({formatShortDateRange(comparison.period_b.start, comparison.period_b.end)}) minus{" "}
+                    Period 1 ({formatShortDateRange(comparison.period_a.start, comparison.period_a.end)})
                   </p>
                 </div>
                 <div className="save-row">
@@ -660,8 +675,8 @@ function CompareView({ hidden, context }: CompareViewProps) {
                 <CompareMovementChart
                   comparison={comparison}
                   visiblePitchTypes={visiblePitchTypes}
-                  periodALabel={`Period 1 (${formatShortDateRange(comparison.period_a.start, comparison.period_a.end)})`}
-                  periodBLabel={`Period 2 (${formatShortDateRange(comparison.period_b.start, comparison.period_b.end)})`}
+                  periodALabel="Period 1"
+                  periodBLabel="Period 2"
                 />
               </div>
               ) : null}
@@ -670,10 +685,6 @@ function CompareView({ hidden, context }: CompareViewProps) {
               <div className="results-header focus-scroll-target" id="relay-period-heatmaps">
                 <h3>Period Heatmaps</h3>
                 <div className="results-header-actions">
-                  <span>
-                    {formatShortDateRange(comparison.period_a.start, comparison.period_a.end)} and{" "}
-                    {formatShortDateRange(comparison.period_b.start, comparison.period_b.end)}
-                  </span>
                   <button
                     aria-label={collapsedSections.periodHeatmaps ? "Expand period heatmaps" : "Collapse period heatmaps"}
                     className="disclosure-button"
@@ -696,7 +707,6 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   isLoading={isCompareHeatmapLoading}
                   onModeChange={updateCompareHeatmapMode}
                   pitcherHand={comparison.pitcher_hand}
-                  subtitle={formatDateRange(comparison.period_a.start, comparison.period_a.end)}
                   title="Period 1 Heatmap"
                 />
                 <PitchHeatmap
@@ -706,7 +716,6 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   isLoading={isCompareHeatmapLoading}
                   onModeChange={updateCompareHeatmapMode}
                   pitcherHand={comparison.pitcher_hand}
-                  subtitle={formatDateRange(comparison.period_b.start, comparison.period_b.end)}
                   title="Period 2 Heatmap"
                 />
               </div>
@@ -733,10 +742,6 @@ function CompareView({ hidden, context }: CompareViewProps) {
               <div className="results-header focus-scroll-target" id="relay-period-tables">
                 <h3>Period Tables</h3>
                 <div className="results-header-actions">
-                  <span>
-                    {formatShortDateRange(comparison.period_a.start, comparison.period_a.end)} and{" "}
-                    {formatShortDateRange(comparison.period_b.start, comparison.period_b.end)}
-                  </span>
                   <button
                     aria-label={collapsedSections.periodTables ? "Expand period tables" : "Collapse period tables"}
                     className="disclosure-button"
@@ -754,9 +759,6 @@ function CompareView({ hidden, context }: CompareViewProps) {
               <div className="comparison-panels" hidden={collapsedSections.periodTables && !isFocusedResult}>
                 <section className="comparison-panel">
                   <h3>Period 1</h3>
-                  <p>
-                    {formatDateRange(comparison.period_a.start, comparison.period_a.end)}
-                  </p>
                   <div className="summary-row">
                     <span>Pitches</span>
                     <strong>{comparison.period_a.metrics.pitch_count}</strong>
@@ -838,9 +840,6 @@ function CompareView({ hidden, context }: CompareViewProps) {
 
                 <section className="comparison-panel">
                   <h3>Period 2</h3>
-                  <p>
-                    {formatDateRange(comparison.period_b.start, comparison.period_b.end)}
-                  </p>
                   <div className="summary-row">
                     <span>Pitches</span>
                     <strong>{comparison.period_b.metrics.pitch_count}</strong>
@@ -926,10 +925,6 @@ function CompareView({ hidden, context }: CompareViewProps) {
               <div className="results-header focus-scroll-target" id="relay-comparison-table">
                 <h3>Pitch Type Changes</h3>
                 <div className="results-header-actions">
-                  <span>
-                    {formatShortDateRange(comparison.period_b.start, comparison.period_b.end)} minus{" "}
-                    {formatShortDateRange(comparison.period_a.start, comparison.period_a.end)}
-                  </span>
                   <button
                     aria-label={collapsedSections.diffTable ? "Expand pitch-type diff table" : "Collapse pitch-type diff table"}
                     className="disclosure-button"
@@ -1277,11 +1272,11 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   <div className="comparison-panels" hidden={collapsedSections.drilldownPitches}>
                     {[
                       {
-                        label: `Period 1 (${formatShortDateRange(comparison.period_a.start, comparison.period_a.end)})`,
+                        label: "Period 1",
                         pitches: drilldownA,
                       },
                       {
-                        label: `Period 2 (${formatShortDateRange(comparison.period_b.start, comparison.period_b.end)})`,
+                        label: "Period 2",
                         pitches: drilldownB,
                       },
                     ].map((period) => (
@@ -1301,20 +1296,33 @@ function CompareView({ hidden, context }: CompareViewProps) {
                               </tr>
                             </thead>
                             <tbody>
-                              {period.pitches.slice(0, 25).map((pitch, index) => (
-                                <tr key={`${period.label}-${pitch.game_date}-${index}`}>
-                                  <td>{formatDate(pitch.game_date)}</td>
-                                  <td>{formatBatter(pitch)}</td>
-                                  <td>{formatNumber(pitch.release_speed)}</td>
-                                  <td>
-                                    {pitch.balls ?? ""}
-                                    {pitch.balls !== null || pitch.strikes !== null ? "-" : ""}
-                                    {pitch.strikes ?? ""}
-                                  </td>
-                                  <td>{formatDescription(pitch.description)}</td>
-                                  <td>{formatEvent(pitch.events)}</td>
-                                </tr>
-                              ))}
+                              {paddedPitchSamples(period.pitches).map((pitch, index) =>
+                                pitch && !pitch.empty ? (
+                                  <tr key={`${period.label}-${pitch.game_date}-${index}`}>
+                                    <td>{formatDate(pitch.game_date)}</td>
+                                    <td>{formatBatter(pitch)}</td>
+                                    <td>{formatNumber(pitch.release_speed)}</td>
+                                    <td>
+                                      {pitch.balls ?? ""}
+                                      {pitch.balls !== null || pitch.strikes !== null ? "-" : ""}
+                                      {pitch.strikes ?? ""}
+                                    </td>
+                                    <td>{formatDescription(pitch.description)}</td>
+                                    <td>{formatEvent(pitch.events)}</td>
+                                  </tr>
+                                ) : (
+                                  <tr
+                                    className="empty-sample-row"
+                                    key={`${period.label}-empty-${index}`}
+                                  >
+                                    <td colSpan={6}>
+                                      {pitch?.first
+                                        ? `No more ${period.label} samples loaded`
+                                        : "\u00a0"}
+                                    </td>
+                                  </tr>
+                                ),
+                              )}
                             </tbody>
                           </table>
                         </div>

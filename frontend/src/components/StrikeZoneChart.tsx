@@ -586,7 +586,7 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
             title={isCollapsed ? "Expand" : "Collapse"}
             type="button"
           >
-            {isCollapsed ? ">" : "v"}
+            {isCollapsed ? "+" : "-"}
           </button>
         </div>
       </div>
@@ -636,7 +636,7 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
           </button>
           <button
             aria-label="Reset strike zone lens"
-            className="icon-action-button"
+            className="secondary-button compact-action-button"
             onClick={() => {
               setSelectedPitchType(null);
               setCountFilter("all");
@@ -649,16 +649,16 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
             title="Reset lens"
             type="button"
           >
-            ↻
+            Reset
           </button>
           <button
             aria-label={isExpanded ? "Collapse expanded strike zone chart" : "Expand strike zone chart"}
-            className="icon-action-button"
+            className="secondary-button compact-action-button"
             onClick={() => setIsExpanded((current) => !current)}
             title={isExpanded ? "Collapse" : "Expand"}
             type="button"
           >
-            {isExpanded ? "×" : "⛶"}
+            {isExpanded ? "Exit" : "Expand"}
           </button>
         </div>
 

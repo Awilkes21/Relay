@@ -530,7 +530,7 @@ function PitchHeatmap({
               title={isCollapsed ? "Expand" : "Collapse"}
               type="button"
             >
-              {isCollapsed ? ">" : "v"}
+              {isCollapsed ? "+" : "-"}
             </button>
           ) : null}
         </div>

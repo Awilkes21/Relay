@@ -416,7 +416,7 @@ function CompareDeltaHeatmap({
             title={isCollapsed ? "Expand" : "Collapse"}
             type="button"
           >
-            {isCollapsed ? ">" : "v"}
+            {isCollapsed ? "+" : "-"}
           </button>
         </div>
       </div>

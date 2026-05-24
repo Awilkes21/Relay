@@ -127,7 +127,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
   }
 
   function disclosureIcon(isCollapsed: boolean) {
-    return isCollapsed ? ">" : "v";
+    return isCollapsed ? "+" : "-";
   }
 
   function formatQualityRate(value: number | null | undefined) {
@@ -284,7 +284,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
                   type="button"
                   onClick={() => removePitchFilter(filter.name)}
                 >
-                  {filter.label}: {filter.value} x
+                  {filter.label}: {filter.value} Clear
                 </button>
               ))}
             </div>

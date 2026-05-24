@@ -2125,7 +2125,7 @@ function App() {
           type="button"
         >
           <span>{label}</span>
-          <span aria-hidden="true">{isActive ? (pitchSort.direction === "asc" ? "▲" : "▼") : "↕"}</span>
+          <span aria-hidden="true">{isActive ? (pitchSort.direction === "asc" ? "Asc" : "Desc") : "Sort"}</span>
         </button>
       </th>
     );
@@ -2617,7 +2617,7 @@ function App() {
       <header className="app-header">
         <div>
           <h1>Relay</h1>
-          <p>Baseball analytics for exploring Statcast pitch data</p>
+          <p>Ask questions, compare changes, and inspect cached Statcast pitch data.</p>
         </div>
         <div className="header-actions">
           <button
@@ -2627,7 +2627,7 @@ function App() {
             title={theme === "dark" ? "Light mode" : "Dark mode"}
             type="button"
           >
-            {theme === "dark" ? "☀" : "☾"}
+            {theme === "dark" ? "Light" : "Dark"}
           </button>
           <div className={`status-pill status-pill--${backendStatus}`}>
             <span className="status-dot" />
@@ -2667,12 +2667,12 @@ function App() {
       <section className="home-section" hidden={activeView !== "home"} aria-labelledby="home-title">
         <div className="home-copy">
           <h2 id="home-title">Ask Relay</h2>
-          <p>Start with a plain-language baseball question. Relay will translate it into filters, searches, charts, or comparisons.</p>
+          <p>Start with a plain-language baseball question. Relay will open the matching view and keep each answer in your workspace.</p>
         </div>
         <section className="ask-relay-panel" aria-label="Ask Relay">
           <form className="ask-relay-form" onSubmit={handleAskRelay}>
             <label className="ask-relay-field">
-              <span>Question</span>
+              <span>What do you want to see?</span>
               <input
                 value={askQuery}
                 onChange={(event) => setAskQuery(event.target.value)}
@@ -2685,6 +2685,7 @@ function App() {
             </button>
           </form>
           <div className="query-examples" aria-label="Example questions">
+            <span>Try</span>
             {sampleQueries.map((example) => (
               <button
                 key={example}
@@ -2743,7 +2744,7 @@ function App() {
                       title={isCollapsed ? "Expand" : "Collapse"}
                       type="button"
                     >
-                      {isCollapsed ? ">" : "v"}
+                      {isCollapsed ? "+" : "-"}
                     </button>
                     <div>
                       <span>Showing</span>
@@ -2762,12 +2763,12 @@ function App() {
                       </button>
                       <button
                         aria-label={`Remove ${focusLabel(answer.target)} answer`}
-                        className="icon-action-button"
+                        className="secondary-button compact-action-button"
                         onClick={() => removeHomeAnswer(answer.id)}
                         title="Remove answer"
                         type="button"
                       >
-                        x
+                        Remove
                       </button>
                     </div>
                   </header>
@@ -2914,3 +2915,4 @@ function App() {
 }
 
 export default App;
+

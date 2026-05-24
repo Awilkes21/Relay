@@ -449,9 +449,9 @@ function CompareMovementChart({
             }}
             tabIndex={0}
           >
-            <circle cx={x + insetSize - 16} cy={y + 16} r="9" />
-            <text x={x + insetSize - 16} y={y + 16}>
-              x
+            <rect height="20" rx="10" width="46" x={x + insetSize - 58} y={y + 6} />
+            <text x={x + insetSize - 35} y={y + 16}>
+              Clear
             </text>
           </g>
         ) : null}
@@ -515,7 +515,7 @@ function CompareMovementChart({
             title={isCollapsed ? "Expand" : "Collapse"}
             type="button"
           >
-            {isCollapsed ? ">" : "v"}
+            {isCollapsed ? "+" : "-"}
           </button>
         </div>
       </div>
