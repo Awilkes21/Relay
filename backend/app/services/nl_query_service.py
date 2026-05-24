@@ -98,6 +98,7 @@ COMMON_ARGS = {
     "events": "Statcast plate appearance result code.",
     "base_state": "bases_empty or runners_on.",
     "location_filter": "zone or out_of_zone.",
+    "focus": "Optional UI result focus: table, heatmap, movement, strike_zone, arsenal, summary.",
 }
 
 SKILL_REGISTRY: dict[str, dict[str, Any]] = {
@@ -119,6 +120,7 @@ SKILL_REGISTRY: dict[str, dict[str, Any]] = {
             "period_a_season": "Four-digit season for Period 1.",
             "period_b_season": "Four-digit season for Period 2.",
             "period_b_to_date": "True when Period 2 should use available data so far.",
+            "focus": "Optional UI result focus: summary, movement_diff, heatmap, location_delta, comparison_table, period_tables.",
         },
     },
     ARSENAL_SKILL: {
@@ -223,6 +225,10 @@ class RuleBasedQueryIntentParser:
             warnings.append("No unique cached pitcher name was found.")
 
         args.update(self._parse_common_filters(normalized_query))
+        focus = self._parse_focus(normalized_query, skill)
+        if focus:
+            args["focus"] = focus
+
         if skill == HEATMAP_SKILL:
             args["mode"] = self._parse_heatmap_mode(normalized_query)
         elif skill == COMPARE_SKILL:
@@ -251,6 +257,30 @@ class RuleBasedQueryIntentParser:
         if re.search(r"\b(movement|shape|break profile|pitch shape)\b", query):
             return MOVEMENT_SKILL
         return SEARCH_SKILL
+
+    def _parse_focus(self, query: str, skill: str) -> str | None:
+        """Parse the preferred UI surface without changing the data query.
+
+        This is deliberately a display hint, not executable behavior. A future
+        model-backed parser can emit the same allow-listed focus values.
+        """
+        is_compare = skill == COMPARE_SKILL
+
+        if re.search(r"\b(diff table|comparison table|table|rows?|pitch list|pitch table)\b", query):
+            return "comparison_table" if is_compare else "table"
+        if re.search(r"\b(delta heatmap|delta heat map|location delta|heatmap difference|heat map difference)\b", query):
+            return "location_delta"
+        if re.search(r"\b(heatmap|heat map|location map|zone map)\b", query):
+            return "heatmap"
+        if re.search(r"\b(movement|movement chart|shape|break profile|pitch shape)\b", query):
+            return "movement_diff" if is_compare else "movement"
+        if re.search(r"\b(strike zone|zone chart|location scatter|pitch locations?)\b", query):
+            return "strike_zone"
+        if re.search(r"\b(arsenal|pitch mix|usage table|usage chart|pitch usage)\b", query):
+            return "arsenal"
+        if re.search(r"\b(summary|metric cards?|metrics?|data ?points?|datapoints?)\b", query):
+            return "summary"
+        return None
 
     def _parse_common_filters(self, query: str) -> dict[str, Any]:
         filters: dict[str, Any] = {}
@@ -385,9 +415,9 @@ class RuleBasedQueryIntentParser:
         season_match = re.search(r"\b(20\d{2})\b", query)
         if season_match:
             return int(season_match.group(1))
-        if re.search(r"\b(?:this|current)\s+season\b", query):
+        if re.search(r"\b(?:this|current)\s+(?:season|year)\b", query):
             return date.today().year
-        if re.search(r"\b(?:last|previous|prior)\s+season\b", query):
+        if re.search(r"\b(?:last|previous|prior)\s+(?:season|year)\b", query):
             return date.today().year - 1
         return None
 

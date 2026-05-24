@@ -155,6 +155,7 @@ class NaturalLanguageQueryServiceTests(unittest.TestCase):
                 "pitcher_name": "Paul Skenes",
                 "pitch_type_group": "fastball",
                 "batter_hand": "R",
+                "focus": "heatmap",
                 "mode": "hard_contact",
             },
         )
@@ -202,14 +203,34 @@ class NaturalLanguageQueryServiceTests(unittest.TestCase):
                 "pitcher_name": "Tarik Skubal",
                 "season": 2025,
                 "batter_hand": "L",
+                "focus": "arsenal",
             },
         )
 
     def test_parses_relative_season_words(self):
         this_season = self.parser().parse("Skenes fastballs this season")["args"]["season"]
+        this_year = self.parser().parse("Skenes fastballs this year")["args"]["season"]
         last_season = self.parser().parse("Skenes fastballs last season")["args"]["season"]
+        last_year = self.parser().parse("Skenes fastballs last year")["args"]["season"]
 
+        self.assertEqual(this_year, this_season)
         self.assertEqual(last_season, this_season - 1)
+        self.assertEqual(last_year, this_season - 1)
+
+    def test_parses_this_year_heatmap_query(self):
+        result = self.parser().parse("heatmap for Skenes curveballs this year")
+
+        self.assertEqual(result["skill"], "get_pitch_heatmap")
+        self.assertEqual(
+            result["args"],
+            {
+                "pitcher_name": "Paul Skenes",
+                "pitch_type": "CU",
+                "season": __import__("datetime").date.today().year,
+                "focus": "heatmap",
+                "mode": "all",
+            },
+        )
 
     def test_routes_movement_queries(self):
         result = self.parser().parse("show Nola sinker movement profile")
@@ -220,8 +241,27 @@ class NaturalLanguageQueryServiceTests(unittest.TestCase):
             {
                 "pitcher_name": "Aaron Nola",
                 "pitch_type": "SI",
+                "focus": "movement",
             },
         )
+
+    def test_parses_result_focus_for_search_views(self):
+        table_result = self.parser().parse("show Skenes fastballs over 99 as a table")
+        strike_zone_result = self.parser().parse("show Skenes pitch locations")
+        arsenal_result = self.parser().parse("show Skubal pitch mix")
+
+        self.assertEqual(table_result["args"]["focus"], "table")
+        self.assertEqual(strike_zone_result["args"]["focus"], "strike_zone")
+        self.assertEqual(arsenal_result["args"]["focus"], "arsenal")
+
+    def test_parses_result_focus_for_compare_views(self):
+        movement_result = self.parser().parse("compare Nola previous season vs current season movement")
+        table_result = self.parser().parse("compare Nola previous season vs current season diff table")
+        heatmap_result = self.parser().parse("compare Nola previous season vs current season delta heatmap")
+
+        self.assertEqual(movement_result["args"]["focus"], "movement_diff")
+        self.assertEqual(table_result["args"]["focus"], "comparison_table")
+        self.assertEqual(heatmap_result["args"]["focus"], "location_delta")
 
     def test_validation_drops_unsupported_args(self):
         result = validate_skill_call(

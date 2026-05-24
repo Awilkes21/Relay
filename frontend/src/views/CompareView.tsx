@@ -85,8 +85,13 @@ function CompareView({ hidden, context }: CompareViewProps) {
     rateDelta,
     formatBatter,
     formatDescription,
-    formatEvent
+    formatEvent,
+    compareFocus,
+    lastAppliedQuery,
+    focusedResultTarget
   } = context;
+  const isFocusedResult = Boolean(focusedResultTarget);
+  const activeFocusTarget = compareFocus?.target || focusedResultTarget;
   const [isSearchCollapsed, setIsSearchCollapsed] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState({
     savedComparisons: true,
@@ -104,6 +109,39 @@ function CompareView({ hidden, context }: CompareViewProps) {
     }
   }, [comparison]);
 
+  useEffect(() => {
+    if (!activeFocusTarget || hidden) return;
+
+    const targetMap: Record<string, { id: string; section?: keyof typeof collapsedSections }> = {
+      summary: { id: "relay-compare-summary" },
+      movement: { id: "relay-compare-movement" },
+      movement_diff: { id: "relay-compare-movement" },
+      heatmap: { id: "relay-period-heatmaps", section: "periodHeatmaps" },
+      period_heatmaps: { id: "relay-period-heatmaps", section: "periodHeatmaps" },
+      location_delta: { id: "relay-delta-heatmap" },
+      table: { id: "relay-comparison-table", section: "diffTable" },
+      comparison_table: { id: "relay-comparison-table", section: "diffTable" },
+      period_tables: { id: "relay-period-tables", section: "periodTables" },
+      drilldown: { id: "relay-drilldown" },
+    };
+    const target = targetMap[activeFocusTarget];
+    if (!target) return;
+
+    if (target.section) {
+      setCollapsedSections((current) => ({
+        ...current,
+        [target.section as keyof typeof collapsedSections]: false,
+      }));
+    }
+
+    window.requestAnimationFrame(() => {
+      document.getElementById(target.id)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }, [activeFocusTarget, compareFocus, hidden]);
+
   function toggleSection(section: keyof typeof collapsedSections) {
     setCollapsedSections((current) => ({
       ...current,
@@ -113,6 +151,10 @@ function CompareView({ hidden, context }: CompareViewProps) {
 
   function disclosureIcon(isCollapsed: boolean) {
     return isCollapsed ? ">" : "v";
+  }
+
+  function shouldShowResult(targets: string[]) {
+    return !isFocusedResult || targets.includes(focusedResultTarget);
   }
 
   const selectedScopePitchTypes = compareFilters.pitch_type
@@ -167,7 +209,14 @@ function CompareView({ hidden, context }: CompareViewProps) {
             <span>{API_URL}</span>
           </div>
 
-          {comparison ? (
+          {lastAppliedQuery ? (
+            <div className="applied-query-context">
+              <span>Asked Relay</span>
+              <strong>{lastAppliedQuery}</strong>
+            </div>
+          ) : null}
+
+          {comparison && !isFocusedResult ? (
             <div className="collapsed-search-bar">
               <div>
                 <span>Comparison Search</span>
@@ -189,7 +238,7 @@ function CompareView({ hidden, context }: CompareViewProps) {
 
           <form
             className={isSearchCollapsed ? "filter-panel compare-workflow is-collapsed" : "filter-panel compare-workflow"}
-            hidden={isSearchCollapsed}
+            hidden={isSearchCollapsed || isFocusedResult}
             onSubmit={handleCompare}
           >
             {pitcherError ? <div className="inline-note">{pitcherError}</div> : null}
@@ -517,6 +566,7 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   </div>
                 </div>
               ) : null}
+              {!isFocusedResult ? (
               <div className="display-pitch-filter-row">
                 <div className="display-pitch-filter-heading">
                   <span>Display</span>
@@ -561,7 +611,9 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   ))}
                 </div>
               </div>
-              <div className="comparison-summary">
+              ) : null}
+              {shouldShowResult(["summary"]) ? (
+              <div className="comparison-summary focus-scroll-target" id="relay-compare-summary">
                 <div className="metric-card">
                   <span>Usage Delta</span>
                   <strong>{topUsageDelta}</strong>
@@ -603,15 +655,21 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   </strong>
                 </div>
               </div>
+              ) : null}
 
-              <CompareMovementChart
-                comparison={comparison}
-                visiblePitchTypes={visiblePitchTypes}
-                periodALabel={`Period 1 (${formatShortDateRange(comparison.period_a.start, comparison.period_a.end)})`}
-                periodBLabel={`Period 2 (${formatShortDateRange(comparison.period_b.start, comparison.period_b.end)})`}
-              />
+              {shouldShowResult(["movement", "movement_diff"]) ? (
+              <div className="focus-scroll-target" id="relay-compare-movement">
+                <CompareMovementChart
+                  comparison={comparison}
+                  visiblePitchTypes={visiblePitchTypes}
+                  periodALabel={`Period 1 (${formatShortDateRange(comparison.period_a.start, comparison.period_a.end)})`}
+                  periodBLabel={`Period 2 (${formatShortDateRange(comparison.period_b.start, comparison.period_b.end)})`}
+                />
+              </div>
+              ) : null}
 
-              <div className="results-header">
+              {shouldShowResult(["heatmap", "period_heatmaps"]) ? (
+              <div className="results-header focus-scroll-target" id="relay-period-heatmaps">
                 <h3>Period Heatmaps</h3>
                 <div className="results-header-actions">
                   <span>
@@ -629,7 +687,9 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   </button>
                 </div>
               </div>
+              ) : null}
 
+              {shouldShowResult(["heatmap", "period_heatmaps"]) ? (
               <div className="comparison-panels" hidden={collapsedSections.periodHeatmaps}>
                 <PitchHeatmap
                   collapsible={false}
@@ -652,21 +712,27 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   title="Period 2 Heatmap"
                 />
               </div>
+              ) : null}
 
-              <CompareDeltaHeatmap
-                periodA={compareHeatmapA}
-                periodB={compareHeatmapB}
-                isLoading={isCompareHeatmapLoading}
-                periodAStart={comparison.period_a.start}
-                periodAEnd={comparison.period_a.end}
-                periodBStart={comparison.period_b.start}
-                periodBEnd={comparison.period_b.end}
-                pitcherHand={comparison.pitcher_hand}
-                pitchType={compareFilters.pitch_type}
-                batterHand={compareFilters.batter_hand}
-              />
+              {shouldShowResult(["location_delta"]) ? (
+              <div className="focus-scroll-target" id="relay-delta-heatmap">
+                <CompareDeltaHeatmap
+                  periodA={compareHeatmapA}
+                  periodB={compareHeatmapB}
+                  isLoading={isCompareHeatmapLoading}
+                  periodAStart={comparison.period_a.start}
+                  periodAEnd={comparison.period_a.end}
+                  periodBStart={comparison.period_b.start}
+                  periodBEnd={comparison.period_b.end}
+                  pitcherHand={comparison.pitcher_hand}
+                  pitchType={compareFilters.pitch_type}
+                  batterHand={compareFilters.batter_hand}
+                />
+              </div>
+              ) : null}
 
-              <div className="results-header">
+              {shouldShowResult(["period_tables"]) ? (
+              <div className="results-header focus-scroll-target" id="relay-period-tables">
                 <h3>Period Tables</h3>
                 <div className="results-header-actions">
                   <span>
@@ -684,8 +750,10 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   </button>
                 </div>
               </div>
+              ) : null}
 
-              <div className="comparison-panels" hidden={collapsedSections.periodTables}>
+              {shouldShowResult(["period_tables"]) ? (
+              <div className="comparison-panels" hidden={collapsedSections.periodTables && !isFocusedResult}>
                 <section className="comparison-panel">
                   <h3>Period 1</h3>
                   <p>
@@ -712,11 +780,11 @@ function CompareView({ hidden, context }: CompareViewProps) {
                       <tr>
                         <th>Pitch</th>
                         <th>Usage</th>
-                        <th>Velo</th>
-                        <th>Spin</th>
-                        <th>IVB</th>
-                        <th>HB</th>
-                        <th>Arm</th>
+                        <th>Velo (mph)</th>
+                        <th>Spin (rpm)</th>
+                        <th>IVB (in)</th>
+                        <th>HB (in)</th>
+                        <th>Arm (deg)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -796,11 +864,11 @@ function CompareView({ hidden, context }: CompareViewProps) {
                       <tr>
                         <th>Pitch</th>
                         <th>Usage</th>
-                        <th>Velo</th>
-                        <th>Spin</th>
-                        <th>IVB</th>
-                        <th>HB</th>
-                        <th>Arm</th>
+                        <th>Velo (mph)</th>
+                        <th>Spin (rpm)</th>
+                        <th>IVB (in)</th>
+                        <th>HB (in)</th>
+                        <th>Arm (deg)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -854,8 +922,10 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   </table>
                 </section>
               </div>
+              ) : null}
 
-              <div className="results-header">
+              {shouldShowResult(["table", "comparison_table"]) ? (
+              <div className="results-header focus-scroll-target" id="relay-comparison-table">
                 <h3>Pitch-Type Diff</h3>
                 <div className="results-header-actions">
                   <span>
@@ -873,7 +943,9 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   </button>
                 </div>
               </div>
-              <div className="table-wrap" hidden={collapsedSections.diffTable}>
+              ) : null}
+              {shouldShowResult(["table", "comparison_table"]) ? (
+              <div className="table-wrap" hidden={collapsedSections.diffTable && !isFocusedResult}>
                 <table className="comparison-table">
                   <thead>
                     <tr>
@@ -882,13 +954,13 @@ function CompareView({ hidden, context }: CompareViewProps) {
                       <th>A Usage</th>
                       <th>B Usage</th>
                       <th>Usage Delta</th>
-                      <th>A Velo</th>
-                      <th>B Velo</th>
-                      <th>Velo Delta</th>
-                      <th>Spin Delta</th>
-                      <th>IVB Delta</th>
-                      <th>HB Delta</th>
-                      <th>Arm Delta</th>
+                      <th>A Velo (mph)</th>
+                      <th>B Velo (mph)</th>
+                      <th>Velo Delta (mph)</th>
+                      <th>Spin Delta (rpm)</th>
+                      <th>IVB Delta (in)</th>
+                      <th>HB Delta (in)</th>
+                      <th>Arm Delta (deg)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1002,8 +1074,9 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   </tbody>
                 </table>
               </div>
-              {drilldownPitchType ? (
-                <section className="chart-panel">
+              ) : null}
+              {drilldownPitchType && shouldShowResult(["drilldown"]) ? (
+                <section className="chart-panel focus-scroll-target" id="relay-drilldown">
                   <div className="chart-heading">
                     <div>
                       <h3>{formatPitchType(drilldownPitchType)} Pitch Drilldown</h3>
@@ -1223,7 +1296,7 @@ function CompareView({ hidden, context }: CompareViewProps) {
                               <tr>
                                 <th>Date</th>
                                 <th>Batter</th>
-                                <th>Velo</th>
+                                <th>Velo (mph)</th>
                                 <th>Count</th>
                                 <th>Result</th>
                                 <th>PA</th>
@@ -1258,6 +1331,8 @@ function CompareView({ hidden, context }: CompareViewProps) {
               <p>
                 {isComparing
                   ? "Loading comparison..."
+                  : isFocusedResult
+                    ? "No comparison matched this query. Try removing or modifying some filters."
                   : "Choose two date ranges to compare a pitcher's profile."}
               </p>
             </div>

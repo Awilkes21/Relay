@@ -56,9 +56,14 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
     formatBreak,
     formatDescription,
     formatEvent,
-    dataQualityMetrics
+    dataQualityMetrics,
+    explorerFocus,
+    lastAppliedQuery,
+    focusedResultTarget
   } = context;
   const hasSearchResults = totalResultCount > 0 || results.length > 0;
+  const isFocusedResult = Boolean(focusedResultTarget);
+  const activeFocusTarget = explorerFocus?.target || focusedResultTarget;
   const [isSearchCollapsed, setIsSearchCollapsed] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState({
     dataQuality: true,
@@ -83,6 +88,36 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
     }
   }, [hasSearchResults]);
 
+  useEffect(() => {
+    if (!activeFocusTarget || hidden) return;
+
+    const targetMap: Record<string, { id: string; section?: keyof typeof collapsedSections }> = {
+      summary: { id: "relay-explorer-results" },
+      data_quality: { id: "relay-data-quality", section: "dataQuality" },
+      arsenal: { id: "relay-arsenal-summary", section: "arsenal" },
+      heatmap: { id: "relay-pitch-heatmap" },
+      strike_zone: { id: "relay-strike-zone" },
+      movement: { id: "relay-movement" },
+      table: { id: "relay-pitch-table", section: "resultsTable" },
+    };
+    const target = targetMap[activeFocusTarget];
+    if (!target) return;
+
+    if (target.section) {
+      setCollapsedSections((current) => ({
+        ...current,
+        [target.section as keyof typeof collapsedSections]: false,
+      }));
+    }
+
+    window.requestAnimationFrame(() => {
+      document.getElementById(target.id)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }, [activeFocusTarget, explorerFocus, hidden]);
+
   function toggleSection(section: keyof typeof collapsedSections) {
     setCollapsedSections((current) => ({
       ...current,
@@ -95,11 +130,22 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
   }
 
   function formatQualityRate(value: number | null | undefined) {
-    return value === null || value === undefined ? "-" : `${Math.round(value * 100)}%`;
+    if (value === null || value === undefined) return "-";
+
+    const percent = value * 100;
+    if (percent === 0 || percent === 100) return `${percent.toFixed(0)}%`;
+    if (percent < 0.1) return "<0.1%";
+    if (percent > 99.9) return ">99.9%";
+    if (percent < 1 || percent > 99) return `${percent.toFixed(1)}%`;
+    return `${percent.toFixed(0)}%`;
   }
 
   function qualityScopeLabel(scope: string) {
     return scope === "balls_in_play" ? "BIP" : "pitches";
+  }
+
+  function shouldShowResult(targets: string[]) {
+    return !isFocusedResult || targets.includes(focusedResultTarget);
   }
 
   return (
@@ -113,7 +159,14 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
           <span>{API_URL}</span>
         </div>
 
-        {hasSearchResults ? (
+        {lastAppliedQuery ? (
+          <div className="applied-query-context">
+            <span>Asked Relay</span>
+            <strong>{lastAppliedQuery}</strong>
+          </div>
+        ) : null}
+
+        {hasSearchResults && !isFocusedResult ? (
           <div className="collapsed-search-bar">
             <div>
               <span>Pitch Explorer Search</span>
@@ -134,7 +187,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
 
         <form
           className={isSearchCollapsed ? "filter-panel is-collapsed" : "filter-panel"}
-          hidden={isSearchCollapsed}
+          hidden={isSearchCollapsed || isFocusedResult}
           onSubmit={handleSearch}
         >
           {pitcherError ? <div className="inline-note">{pitcherError}</div> : null}
@@ -256,8 +309,8 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
 
         {searchError ? <div className="error-banner">{searchError}</div> : null}
 
-        {dataQualityMetrics.length > 0 ? (
-          <section className="chart-panel data-quality-panel">
+        {dataQualityMetrics.length > 0 && shouldShowResult(["data_quality"]) ? (
+          <section className="chart-panel data-quality-panel focus-scroll-target" id="relay-data-quality">
             <div className="chart-heading collapsible-heading">
               <div>
                 <h3>Data Quality</h3>
@@ -296,7 +349,8 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
           </section>
         ) : null}
 
-        <div className="results-header">
+        {shouldShowResult(["summary"]) ? (
+        <div className="results-header focus-scroll-target" id="relay-explorer-results">
           <h3>Results</h3>
           <div className="results-header-actions">
             <span>
@@ -306,7 +360,8 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
             </span>
           </div>
         </div>
-        {results.length > 0 ? (
+        ) : null}
+        {results.length > 0 && !isFocusedResult ? (
           <button
             className="secondary-button"
             onClick={() =>
@@ -348,8 +403,8 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
           </button>
         ) : null}
 
-        {arsenalSummary.length > 0 ? (
-          <section className="chart-panel">
+        {arsenalSummary.length > 0 && shouldShowResult(["arsenal"]) ? (
+          <section className="chart-panel focus-scroll-target" id="relay-arsenal-summary">
             <div className="chart-heading collapsible-heading">
               <h3>Arsenal Summary</h3>
               <div className="section-actions">
@@ -372,10 +427,10 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
                     <th>Pitch</th>
                     <th>Count</th>
                     <th>Usage</th>
-                    <th>Velo</th>
-                    <th>Spin</th>
-                    <th>IVB</th>
-                    <th>HB</th>
+                    <th>Velo (mph)</th>
+                    <th>Spin (rpm)</th>
+                    <th>IVB (in)</th>
+                    <th>HB (in)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -395,18 +450,30 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
             </div>
           </section>
         ) : null}
-        <PitchHeatmap
-          heatmap={heatmap}
-          mode={heatmapMode}
-          isLoading={isHeatmapLoading}
-          onModeChange={updateHeatmapMode}
-          pitcherHand={results.find((pitch) => pitch.p_throws)?.p_throws}
-        />
-        <StrikeZoneChart pitches={results} />
-        <MovementChart pitches={results} />
+        {shouldShowResult(["heatmap"]) ? (
+        <div className="focus-scroll-target" id="relay-pitch-heatmap">
+          <PitchHeatmap
+            heatmap={heatmap}
+            mode={heatmapMode}
+            isLoading={isHeatmapLoading}
+            onModeChange={updateHeatmapMode}
+            pitcherHand={results.find((pitch) => pitch.p_throws)?.p_throws}
+          />
+        </div>
+        ) : null}
+        {shouldShowResult(["strike_zone"]) ? (
+        <div className="focus-scroll-target" id="relay-strike-zone">
+          <StrikeZoneChart pitches={results} />
+        </div>
+        ) : null}
+        {shouldShowResult(["movement"]) ? (
+        <div className="focus-scroll-target" id="relay-movement">
+          <MovementChart pitches={results} />
+        </div>
+        ) : null}
 
-        {results.length > 0 ? (
-          <div className="table-disclosure-bar">
+        {results.length > 0 && shouldShowResult(["table"]) ? (
+          <div className="table-disclosure-bar focus-scroll-target" id="relay-pitch-table">
             <div>
               <span>Pitch Table</span>
               <strong>
@@ -427,7 +494,8 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
           </div>
         ) : null}
 
-        <div className="table-wrap" hidden={results.length > 0 && collapsedSections.resultsTable}>
+        {shouldShowResult(["table"]) ? (
+        <div className="table-wrap" hidden={results.length > 0 && collapsedSections.resultsTable && !isFocusedResult}>
           {results.length > 0 ? (
             <table>
               <thead>
@@ -436,15 +504,15 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
                   {renderSortableHeader("player_name", "Pitcher")}
                   {renderSortableHeader("batter_name", "Batter")}
                   {renderSortableHeader("pitch_type", "Type")}
-                  {renderSortableHeader("release_speed", "Velocity")}
-                  {renderSortableHeader("release_spin_rate", "Spin")}
-                  {renderSortableHeader("pfx_z", "IVB")}
-                  {renderSortableHeader("pfx_x", "HB")}
+                  {renderSortableHeader("release_speed", "Velocity (mph)")}
+                  {renderSortableHeader("release_spin_rate", "Spin (rpm)")}
+                  {renderSortableHeader("pfx_z", "IVB (in)")}
+                  {renderSortableHeader("pfx_x", "HB (in)")}
                   {renderSortableHeader("location", "Location")}
                   {renderSortableHeader("bb_type", "Contact")}
-                  {renderSortableHeader("launch_speed", "Exit Velo")}
-                  {renderSortableHeader("launch_angle", "Launch Angle")}
-                  {renderSortableHeader("hit_distance_sc", "Distance")}
+                  {renderSortableHeader("launch_speed", "Exit Velo (mph)")}
+                  {renderSortableHeader("launch_angle", "Launch Angle (deg)")}
+                  {renderSortableHeader("hit_distance_sc", "Distance (ft)")}
                   {renderSortableHeader("estimated_ba_using_speedangle", "xBA")}
                   {renderSortableHeader("estimated_woba_using_speedangle", "xwOBA")}
                   {renderSortableHeader("count", "Count")}
@@ -488,6 +556,8 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
               <p>
                 {isSearching
                   ? "Loading pitches..."
+                  : isFocusedResult
+                    ? "No pitches matched this query. Try removing or modifying some filters."
                   : selectedExplorerPitcher()
                     ? "Run a search to see cached Statcast pitches."
                     : "Choose a pitcher to begin exploring cached Statcast pitches."}
@@ -495,6 +565,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
             </div>
           )}
         </div>
+        ) : null}
       </section>
   );
 }

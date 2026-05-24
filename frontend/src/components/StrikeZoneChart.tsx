@@ -649,7 +649,7 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
             title="Reset lens"
             type="button"
           >
-            R
+            ↻
           </button>
           <button
             aria-label={isExpanded ? "Collapse expanded strike zone chart" : "Expand strike zone chart"}
@@ -658,7 +658,7 @@ function StrikeZoneChart({ pitches }: StrikeZoneChartProps) {
             title={isExpanded ? "Collapse" : "Expand"}
             type="button"
           >
-            {isExpanded ? "x" : "[]"}
+            {isExpanded ? "×" : "⛶"}
           </button>
         </div>
 

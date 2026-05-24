@@ -1,96 +1,139 @@
 # Relay
-Baseball analytics platform focused on exploring and comparing pitcher and team behavior over time.
 
-Backend: FastAPI
-Frontend: React + TypeScript + Vite
-Data: DuckDB first, Postgres later if needed
-Ingestion: pybaseball / Statcast
-Charts: SVG/D3 or Recharts
+Relay is a baseball analytics app for querying, visualizing, and comparing cached Statcast pitch-level data.
 
-## Backend
+The core idea is query-first baseball analysis: ask for a pitcher, pitch type, chart, table, or comparison in plain language, then open the full Pitch Explorer or Compare workbench when you want deeper control.
 
-Run the FastAPI backend locally:
+## What Relay Does
 
-```bash
+- Ingests Statcast pitch-level data into a local Parquet cache.
+- Queries cached data through a FastAPI backend using DuckDB.
+- Provides a React + TypeScript frontend with:
+  - Ask Relay natural-language query entry
+  - Pitch Explorer filters, tables, heatmaps, strike-zone views, and movement charts
+  - Pitcher comparison workflow with period presets, movement diff, heatmaps, and pitch-type deltas
+- Keeps natural language deterministic for now by translating text into safe structured skill calls. Relay does not generate raw SQL.
+
+## Repository Layout
+
+```txt
+backend/
+  app/
+    api/          FastAPI route modules
+    db/           DuckDB/parquet cache helpers
+    services/     pitch search, comparison, and query parsing logic
+    main.py       FastAPI app entrypoint
+  scripts/        Statcast ingestion scripts and provider layer
+  tests/          backend unit tests
+
+frontend/
+  src/
+    components/   chart and reusable UI components
+    views/        Pitch Explorer and Compare workbench views
+    App.tsx       app shell, Ask Relay flow, shared state
+
+data/             local Statcast cache and manifest, ignored by git
+docs/             project documentation
+```
+
+## Quickstart
+
+### 1. Backend
+
+From the repo root:
+
+```powershell
 cd backend
-python -m venv .venv
-source .venv/bin/activate
+python -m venv ..\.venv
+..\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-On Windows PowerShell, activate the virtual environment with:
+The API runs at `http://127.0.0.1:8000`.
+
+Useful checks:
+
+- Health: `http://127.0.0.1:8000/health`
+- OpenAPI docs: `http://127.0.0.1:8000/docs`
+
+### 2. Frontend
+
+In another terminal:
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-The health check is available at `http://127.0.0.1:8000/health`.
-
-Run a focused Statcast ingestion for one pitcher/date range:
-
-```bash
-python scripts/ingest_statcast.py \
-  --start-date 2024-04-01 \
-  --end-date 2024-04-07 \
-  --pitcher-name "Aaron Nola" \
-  --output ../data/statcast.parquet
-```
-
-Append another pitcher/date range into the shared local parquet cache:
-
-```bash
-python scripts/ingest_statcast.py \
-  --start-date 2024-04-01 \
-  --end-date 2024-09-30 \
-  --pitcher-id 669373 \
-  --output ../data/statcast.parquet \
-  --append
-```
-
-Batch ingest multiple pitchers into the shared cache:
-
-```bash
-python scripts/ingest_statcast_batch.py \
-  --start-date 2024-04-01 \
-  --end-date 2024-09-30 \
-  --pitcher-name "Aaron Nola" \
-  --pitcher-name "Tarik Skubal" \
-  --output ../data/statcast.parquet \
-  --manifest ../data/statcast_manifest.json
-```
-
-The batch script writes one shared parquet cache plus a local manifest with the
-date range, per-pitcher row counts, pitch types, and cache index. Rebuild the
-manifest from an existing cache without fetching new data:
-
-```bash
-python scripts/ingest_statcast_batch.py \
-  --start-date 2024-04-01 \
-  --end-date 2024-09-30 \
-  --output ../data/statcast.parquet \
-  --manifest ../data/statcast_manifest.json \
-  --index-only
-```
-
-Use `--replace` to rebuild the cache from scratch, or omit it to append and
-dedupe against the existing parquet.
-
-Set `RELAY_CORS_ORIGINS` to configure local frontend origins if needed:
-
-```powershell
-$env:RELAY_CORS_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"
-```
-
-## Frontend
-
-Run the React frontend locally:
-
-```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-Set `VITE_API_URL` to point at a different backend URL if needed. By default,
-the frontend uses `http://localhost:8000`.
+The Vite dev server usually runs at `http://localhost:5173`.
+
+The frontend reads `VITE_API_URL`; if unset, it defaults to `http://localhost:8000`.
+
+### 3. Ingest Sample Data
+
+Relay needs a local Statcast cache before pitch searches or comparisons are useful.
+
+Example batch ingestion:
+
+```powershell
+cd backend
+..\.venv\Scripts\Activate.ps1
+python scripts\ingest_statcast_batch.py `
+  --start-date 2024-04-01 `
+  --end-date 2026-05-21 `
+  --pitcher-name "Aaron Nola" `
+  --pitcher-name "Tarik Skubal" `
+  --pitcher-name "Paul Skenes" `
+  --pitcher-name "Nolan McLean" `
+  --pitcher-name "Kyle Bradish" `
+  --pitcher-name "Cade Povich" `
+  --output ..\data\statcast.parquet `
+  --manifest ..\data\statcast_manifest.json `
+  --replace
+```
+
+By default ingestion keeps regular-season games only. Use `--include-spring-training` or `--all-game-types` only when you explicitly want those rows.
+
+## Common Commands
+
+Backend tests:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover backend\tests
+```
+
+Frontend build:
+
+```powershell
+cd frontend
+npm run build
+```
+
+Rebuild the cache manifest without fetching new data:
+
+```powershell
+cd backend
+python scripts\ingest_statcast_batch.py `
+  --start-date 2024-04-01 `
+  --end-date 2026-05-21 `
+  --output ..\data\statcast.parquet `
+  --manifest ..\data\statcast_manifest.json `
+  --index-only
+```
+
+## Documentation
+
+- [docs/development.md](docs/development.md): local setup, commands, and environment variables
+- [docs/data-ingestion.md](docs/data-ingestion.md): Statcast cache, manifest, game types, and ingestion scripts
+- [docs/api.md](docs/api.md): backend endpoint overview and example requests
+- [docs/natural-language.md](docs/natural-language.md): Ask Relay skill-call contract and supported phrasing
+- [docs/frontend.md](docs/frontend.md): frontend views, charts, and query-first UX
+- [docs/architecture.md](docs/architecture.md): system architecture and future direction
+
+## Notes
+
+- `data/statcast.parquet` and `data/statcast_manifest.json` are local cache artifacts, not source-controlled app code.
+- MLBAM pitcher ID is the canonical identity; names are display/search labels.
+- The current natural-language layer is rule-based by design. A model-backed parser can be added later as long as it emits the same validated skill-call shape.

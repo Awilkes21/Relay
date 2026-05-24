@@ -42,6 +42,14 @@ type DateRange = {
   start: Date;
   end: Date;
 };
+type QueryFocusTarget = {
+  target: string;
+  nonce: number;
+};
+type FocusedAnswer = QueryFocusTarget & {
+  view: "explorer" | "compare";
+  query: string;
+};
 type SortDirection = "asc" | "desc";
 type PitchSortKey =
   | "game_date"
@@ -600,6 +608,10 @@ function App() {
   const [isParsingQuery, setIsParsingQuery] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
   const [askNotice, setAskNotice] = useState<string | null>(null);
+  const [lastAppliedQuery, setLastAppliedQuery] = useState("");
+  const [explorerFocus, setExplorerFocus] = useState<QueryFocusTarget | null>(null);
+  const [compareFocus, setCompareFocus] = useState<QueryFocusTarget | null>(null);
+  const [focusedAnswer, setFocusedAnswer] = useState<FocusedAnswer | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -1167,6 +1179,43 @@ function App() {
     return "Movement Summary";
   }
 
+  function focusLabel(target: string) {
+    const labels: Record<string, string> = {
+      summary: "Summary",
+      data_quality: "Data Quality",
+      arsenal: "Arsenal Summary",
+      heatmap: "Heatmap",
+      strike_zone: "Strike Zone",
+      movement: "Movement Chart",
+      movement_diff: "Movement Diff",
+      location_delta: "Delta Heatmap",
+      table: "Pitch Table",
+      comparison_table: "Pitch-Type Diff Table",
+      period_tables: "Period Tables",
+      period_heatmaps: "Period Heatmaps",
+      drilldown: "Drilldown",
+    };
+    return labels[target] ?? target.replaceAll("_", " ");
+  }
+
+  function skillActionLabel(call: RelaySkillCall) {
+    const focus = skillFocus(call.args);
+    if (call.skill === "compare_pitcher_periods") {
+      if (focus === "movement_diff" || focus === "movement") return "Compare Movement";
+      if (focus === "location_delta") return "Compare Heatmap";
+      if (focus === "heatmap" || focus === "period_heatmaps") return "Compare Heatmaps";
+      if (focus === "comparison_table" || focus === "table") return "Compare Table";
+      if (focus === "summary") return "Compare Summary";
+      return "Apply & Compare";
+    }
+
+    if (focus) return `Show ${focusLabel(focus)}`;
+    if (call.skill === "get_pitch_heatmap") return "Show Heatmap";
+    if (call.skill === "summarize_arsenal") return "Show Arsenal";
+    if (call.skill === "summarize_movement") return "Show Movement";
+    return "Apply & Search";
+  }
+
   function skillArgLabel(name: string) {
     const labels: Record<string, string> = {
       pitcher_name: "Pitcher",
@@ -1184,6 +1233,7 @@ function App() {
       count_group: "Count Group",
       location_filter: "Pitch Location",
       mode: "Heatmap Mode",
+      focus: "View",
       preset: "Preset",
       period_a_season: "Period 1 Season",
       period_b_season: "Period 2 Season",
@@ -1229,6 +1279,7 @@ function App() {
         .map((part) => part[0].toUpperCase() + part.slice(1))
         .join(" ");
     }
+    if (name === "focus") return focusLabel(stringValue);
     if (name === "preset") {
       return stringValue
         .split("_")
@@ -1301,6 +1352,23 @@ function App() {
 
   function isExplorerSkill(skill: RelaySkillCall["skill"]) {
     return skill !== "compare_pitcher_periods";
+  }
+
+  function skillFocus(args: RelaySkillCall["args"]) {
+    const focus = args.focus;
+    return typeof focus === "string" && focus.trim() ? focus.trim() : "";
+  }
+
+  function triggerExplorerFocus(target: string) {
+    if (target) {
+      setExplorerFocus({ target, nonce: Date.now() });
+    }
+  }
+
+  function triggerCompareFocus(target: string) {
+    if (target) {
+      setCompareFocus({ target, nonce: Date.now() });
+    }
   }
 
   async function runPitchSearch(searchFilters: PitchFilters, mode: HeatmapMode) {
@@ -1384,9 +1452,13 @@ function App() {
 
     setAskNotice(null);
     setAskError(null);
+    const focus = skillFocus(skillCall.args);
+    const queryText = askQuery.trim();
+    setLastAppliedQuery(queryText);
 
     if (skillCall.skill === "compare_pitcher_periods") {
-      setActiveView("compare");
+      const shouldFocusAnswer = Boolean(focus);
+      setActiveView(shouldFocusAnswer ? "home" : "compare");
       const scopedFilters = completePitcherName({
         ...initialCompareFilters,
         ...skillArgsToCompareFilters(skillCall.args),
@@ -1419,6 +1491,11 @@ function App() {
           );
           if (seasonFilters) {
             await runCompareSearch(seasonFilters);
+            if (shouldFocusAnswer) {
+              setFocusedAnswer({ view: "compare", target: focus, query: queryText, nonce: Date.now() });
+            } else {
+              triggerCompareFocus("summary");
+            }
             return;
           }
           setAskNotice(
@@ -1446,6 +1523,11 @@ function App() {
           );
           if (presetFilters) {
             await runCompareSearch(presetFilters);
+            if (shouldFocusAnswer) {
+              setFocusedAnswer({ view: "compare", target: focus, query: queryText, nonce: Date.now() });
+            } else {
+              triggerCompareFocus("summary");
+            }
             return;
           }
           setAskNotice(
@@ -1466,9 +1548,16 @@ function App() {
           ? `Applied the compare scope. Use the ${skillArgDisplayValue("preset", preset)} preset to fill the periods.`
           : "Applied the compare scope. Choose the two periods to compare.",
       );
+      if (shouldFocusAnswer) {
+        setFocusedAnswer({ view: "compare", target: focus, query: queryText, nonce: Date.now() });
+      } else {
+        triggerCompareFocus(focus);
+      }
       return;
     }
 
+    const explorerTarget = focus || (skillCall.skill === "get_pitch_heatmap" ? "heatmap" : "");
+    const shouldFocusAnswer = Boolean(explorerTarget);
     const nextHeatmapMode = skillCall.args.mode &&
       ["all", "whiffs", "hard_contact", "in_zone"].includes(String(skillCall.args.mode))
         ? (String(skillCall.args.mode) as HeatmapMode)
@@ -1479,7 +1568,7 @@ function App() {
       pitcher_id: "",
     };
 
-    setActiveView("explorer");
+    setActiveView(shouldFocusAnswer ? "home" : "explorer");
     setFilters(nextFilters);
     setResults([]);
     setResultCount(0);
@@ -1490,6 +1579,11 @@ function App() {
 
     setSearchError(null);
     await runPitchSearch(nextFilters, nextHeatmapMode);
+    if (shouldFocusAnswer) {
+      setFocusedAnswer({ view: "explorer", target: explorerTarget, query: queryText, nonce: Date.now() });
+    } else {
+      triggerExplorerFocus(explorerTarget);
+    }
   }
 
   function updateFilter(name: keyof PitchFilters, value: string) {
@@ -2135,11 +2229,13 @@ function App() {
         </div>
         <div className="header-actions">
           <button
-            className="theme-toggle"
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            className="icon-action-button theme-toggle"
             onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+            title={theme === "dark" ? "Light mode" : "Dark mode"}
             type="button"
           >
-            {theme === "dark" ? "Light" : "Dark"}
+            {theme === "dark" ? "☀" : "☾"}
           </button>
           <div className={`status-pill status-pill--${backendStatus}`}>
             <span className="status-dot" />
@@ -2158,14 +2254,20 @@ function App() {
         </button>
         <button
           className={activeView === "explorer" ? "view-tab is-active" : "view-tab"}
-          onClick={() => setActiveView("explorer")}
+          onClick={() => {
+            setFocusedAnswer(null);
+            setActiveView("explorer");
+          }}
           type="button"
         >
           Pitch Explorer
         </button>
         <button
           className={activeView === "compare" ? "view-tab is-active" : "view-tab"}
-          onClick={() => setActiveView("compare")}
+          onClick={() => {
+            setFocusedAnswer(null);
+            setActiveView("compare");
+          }}
           type="button"
         >
           Compare
@@ -2205,6 +2307,13 @@ function App() {
           </div>
           {askError ? <div className="error-banner">{askError}</div> : null}
           {askNotice ? <div className="inline-note">{askNotice}</div> : null}
+          {skillCall?.warnings.length ? (
+            <div className="query-warning-row" aria-live="polite">
+              {skillCall.warnings.map((warning) => (
+                <span key={warning}>{warning}</span>
+              ))}
+            </div>
+          ) : null}
           {skillCall ? (
             <div className="skill-preview">
               <div className="skill-preview-heading">
@@ -2213,7 +2322,7 @@ function App() {
                   <strong>{skillNameLabel(skillCall.skill)}</strong>
                 </div>
                 <button className="secondary-button" onClick={applySkillCall} type="button">
-                  {isExplorerSkill(skillCall.skill) ? "Apply & Search" : "Apply & Compare"}
+                  {skillActionLabel(skillCall)}
                 </button>
               </div>
               {Object.keys(skillCall.args).length > 0 ? (
@@ -2227,16 +2336,29 @@ function App() {
               ) : (
                 <p className="inline-note">No filters were confidently parsed.</p>
               )}
-              {skillCall.warnings.length > 0 ? (
-                <div className="skill-warnings">
-                  {skillCall.warnings.map((warning) => (
-                    <span key={warning}>{warning}</span>
-                  ))}
-                </div>
-              ) : null}
             </div>
           ) : null}
         </section>
+        {focusedAnswer ? (
+          <section className="focused-answer-header" aria-label="Focused query result">
+            <div>
+              <span>Showing</span>
+              <strong>{focusLabel(focusedAnswer.target)}</strong>
+            </div>
+            <p>{focusedAnswer.query}</p>
+            <button
+              className="secondary-button"
+              onClick={() => {
+                const nextView = focusedAnswer.view;
+                setFocusedAnswer(null);
+                setActiveView(nextView);
+              }}
+              type="button"
+            >
+              Open Full {focusedAnswer.view === "compare" ? "Compare" : "Explorer"}
+            </button>
+          </section>
+        ) : null}
       </section>
       <datalist id="cached-pitchers">
         {pitchers.map((pitcher) => (
@@ -2255,7 +2377,7 @@ function App() {
       </datalist>
 
       <PitchExplorerView
-        hidden={activeView !== "explorer"}
+        hidden={activeView !== "explorer" && !(activeView === "home" && focusedAnswer?.view === "explorer")}
         context={{
           API_URL,
           pitcherError,
@@ -2293,12 +2415,17 @@ function App() {
           formatBreak,
           formatDescription,
           formatEvent,
-          dataQualityMetrics
+          dataQualityMetrics,
+          explorerFocus,
+          lastAppliedQuery: activeView === "explorer" ? lastAppliedQuery : "",
+          focusedResultTarget: activeView === "home" && focusedAnswer?.view === "explorer"
+            ? focusedAnswer.target
+            : ""
         }}
       />
 
       <CompareView
-        hidden={activeView !== "compare"}
+        hidden={activeView !== "compare" && !(activeView === "home" && focusedAnswer?.view === "compare")}
         context={{
           API_URL,
           handleCompare,
@@ -2357,7 +2484,12 @@ function App() {
           rateDelta,
           formatBatter,
           formatDescription,
-          formatEvent
+          formatEvent,
+          compareFocus,
+          lastAppliedQuery: activeView === "compare" ? lastAppliedQuery : "",
+          focusedResultTarget: activeView === "home" && focusedAnswer?.view === "compare"
+            ? focusedAnswer.target
+            : ""
         }}
       />
     </main>

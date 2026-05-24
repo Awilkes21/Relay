@@ -237,7 +237,7 @@ function MovementChart({ pitches }: MovementChartProps) {
             title={isExpanded ? "Collapse" : "Expand"}
             type="button"
           >
-            {isExpanded ? "x" : "[]"}
+            {isExpanded ? "×" : "⛶"}
           </button>
         </div>
         <div className="strike-zone-toolbar-row strike-zone-toolbar-row--secondary">
