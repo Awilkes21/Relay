@@ -40,6 +40,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
     removePitchFilter,
     isSearching,
     clearPitchFilters,
+    openExplorerPitcherProfile,
     handleSearch,
     searchError,
     totalResultCount,
@@ -226,7 +227,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
     return (
       <div className="contextual-quality-note">
         Batted-ball metrics are based on {battedBall.available_count} of{" "}
-        {countLabel(battedBall.denominator_count, "ball in play")} for these filters.
+        {countLabel(battedBall.denominator_count, "ball in play", "balls in play")} for these filters.
       </div>
     );
   }
@@ -437,6 +438,14 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
             </button>
             <button className="secondary-button" onClick={clearPitchFilters} type="button">
               Clear Filters
+            </button>
+            <button
+              className="secondary-button"
+              disabled={!resolvableExplorerPitcher()}
+              onClick={openExplorerPitcherProfile}
+              type="button"
+            >
+              Open Pitcher Profile
             </button>
           </div>
         </form>

@@ -75,12 +75,14 @@ HEATMAP_SKILL = "get_pitch_heatmap"
 COMPARE_SKILL = "compare_pitcher_periods"
 ARSENAL_SKILL = "summarize_arsenal"
 MOVEMENT_SKILL = "summarize_movement"
+PROFILE_SKILL = "open_pitcher_profile"
 SkillName = Literal[
     "search_pitches",
     "get_pitch_heatmap",
     "compare_pitcher_periods",
     "summarize_arsenal",
     "summarize_movement",
+    "open_pitcher_profile",
 ]
 
 COMMON_ARGS = {
@@ -130,6 +132,15 @@ SKILL_REGISTRY: dict[str, dict[str, Any]] = {
     MOVEMENT_SKILL: {
         "description": "Summarize movement and pitch-shape metrics for matching filters.",
         "args": COMMON_ARGS,
+    },
+    PROFILE_SKILL: {
+        "description": "Open a pitcher profile, optionally scoped to season and pitch type.",
+        "args": {
+            "pitcher_name": COMMON_ARGS["pitcher_name"],
+            "pitch_type": COMMON_ARGS["pitch_type"],
+            "season": COMMON_ARGS["season"],
+            "focus": "Optional UI result focus: profile, arsenal, trends, summary.",
+        },
     },
 }
 
@@ -224,7 +235,10 @@ class RuleBasedQueryIntentParser:
         else:
             warnings.append("No unique cached pitcher name was found.")
 
-        args.update(self._parse_common_filters(normalized_query))
+        common_filters = self._parse_common_filters(normalized_query)
+        args.update(common_filters)
+        if skill == SEARCH_SKILL and pitcher_name and self._should_open_profile(normalized_query, common_filters):
+            skill = PROFILE_SKILL
         focus = self._parse_focus(normalized_query, skill)
         if focus:
             args["focus"] = focus
@@ -256,7 +270,25 @@ class RuleBasedQueryIntentParser:
             return ARSENAL_SKILL
         if re.search(r"\b(movement|shape|break profile|pitch shape)\b", query):
             return MOVEMENT_SKILL
+        if re.search(r"\b(profile|pitcher profile|player profile)\b", query):
+            return PROFILE_SKILL
         return SEARCH_SKILL
+
+    def _should_open_profile(self, query: str, filters: dict[str, Any]) -> bool:
+        if re.search(r"\b(overview|general overview|profile overview|player overview|pitcher overview|about|bio|snapshot)\b", query):
+            return True
+        if re.search(r"\b(pitch locations?|strike zone|zone chart|location scatter|table|rows?|pitch list|list pitches?|search|find)\b", query):
+            return False
+
+        filter_keys = set(filters) - {"season"}
+        if filter_keys:
+            return False
+
+        filler_pattern = r"\b(show|open|pull up|load|see|view|me|the|a|an|for|please|profile|pitcher|player|season|year|this|current|last|previous|prior)\b"
+        remaining = re.sub(filler_pattern, " ", query)
+        remaining = re.sub(r"\b20\d{2}\b", " ", remaining)
+        remaining = re.sub(r"\s+", " ", remaining).strip()
+        return bool(remaining) and len(remaining.split()) <= 3
 
     def _parse_focus(self, query: str, skill: str) -> str | None:
         """Parse the preferred UI surface without changing the data query.

@@ -51,6 +51,7 @@ function CompareView({ hidden, context }: CompareViewProps) {
     isComparing,
     canCompare,
     clearCompareFilters,
+    openComparePitcherProfile,
     compareError,
     comparison,
     searchFiltersPitcherName,
@@ -650,6 +651,14 @@ function CompareView({ hidden, context }: CompareViewProps) {
               </button>
               <button className="secondary-button" onClick={clearCompareFilters} type="button">
                 Clear Compare
+              </button>
+              <button
+                className="secondary-button"
+                disabled={!compareDateRange}
+                onClick={openComparePitcherProfile}
+                type="button"
+              >
+                Open Pitcher Profile
               </button>
             </div>
           </form>

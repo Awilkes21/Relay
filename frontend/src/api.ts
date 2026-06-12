@@ -273,7 +273,8 @@ export type RelaySkill =
   | "get_pitch_heatmap"
   | "compare_pitcher_periods"
   | "summarize_arsenal"
-  | "summarize_movement";
+  | "summarize_movement"
+  | "open_pitcher_profile";
 
 export type RelaySkillCall = {
   skill: RelaySkill;

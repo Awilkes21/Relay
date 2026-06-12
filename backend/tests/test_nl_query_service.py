@@ -245,6 +245,49 @@ class NaturalLanguageQueryServiceTests(unittest.TestCase):
             },
         )
 
+    def test_routes_profile_queries(self):
+        result = self.parser().parse("show Skubal 2024 slider profile")
+
+        self.assertEqual(result["skill"], "open_pitcher_profile")
+        self.assertEqual(
+            result["args"],
+            {
+                "pitcher_name": "Tarik Skubal",
+                "pitch_type": "SL",
+                "season": 2024,
+            },
+        )
+
+    def test_routes_pitcher_only_queries_to_profile(self):
+        result = self.parser().parse("Skubal")
+
+        self.assertEqual(result["skill"], "open_pitcher_profile")
+        self.assertEqual(result["args"], {"pitcher_name": "Tarik Skubal"})
+
+    def test_routes_pitcher_overview_queries_to_profile(self):
+        result = self.parser().parse("give me a general overview for Nola in 2024")
+
+        self.assertEqual(result["skill"], "open_pitcher_profile")
+        self.assertEqual(
+            result["args"],
+            {
+                "pitcher_name": "Aaron Nola",
+                "season": 2024,
+            },
+        )
+
+    def test_keeps_pitch_location_queries_in_explorer(self):
+        result = self.parser().parse("show Skubal pitch locations")
+
+        self.assertEqual(result["skill"], "search_pitches")
+        self.assertEqual(
+            result["args"],
+            {
+                "pitcher_name": "Tarik Skubal",
+                "focus": "strike_zone",
+            },
+        )
+
     def test_parses_result_focus_for_search_views(self):
         table_result = self.parser().parse("show Skenes fastballs over 99 as a table")
         strike_zone_result = self.parser().parse("show Skenes pitch locations")

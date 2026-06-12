@@ -911,6 +911,202 @@ button:disabled {
   font-weight: 800;
 }
 
+.profile-time-section {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.profile-time-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.profile-time-heading h3 {
+  margin: 0;
+  color: var(--relay-text);
+  font-size: 20px;
+}
+
+.profile-time-heading p {
+  margin: 5px 0 0;
+  color: var(--relay-muted);
+  font-size: 14px;
+}
+
+.profile-time-selected-heading h4 {
+  margin: 0;
+  color: var(--relay-text);
+  font-size: 16px;
+}
+
+.profile-time-selected-heading p {
+  margin: 4px 0 0;
+  color: var(--relay-muted);
+  font-size: 13px;
+}
+
+.profile-time-controls {
+  display: grid;
+  justify-items: end;
+  gap: 9px;
+}
+
+.profile-time-toggle {
+  display: inline-flex;
+  border: 1px solid var(--relay-border);
+  border-radius: 10px;
+  background: var(--relay-surface);
+  padding: 3px;
+}
+
+.profile-time-toggle-button {
+  min-height: 30px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--relay-muted);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 5px 10px;
+}
+
+.profile-time-toggle-button.is-active {
+  background: var(--relay-primary);
+  color: #ffffff;
+}
+
+:root[data-theme="dark"] .profile-time-toggle-button.is-active {
+  color: #07111d;
+}
+
+.profile-time-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.profile-time-selected-block {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--relay-border-soft);
+  padding-top: 14px;
+}
+
+.profile-time-selected-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.profile-time-chart {
+  display: grid;
+  gap: 12px;
+}
+
+.profile-time-chart-heading {
+  align-items: center;
+}
+
+.profile-time-inspector {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+  min-width: min(250px, 100%);
+}
+
+.profile-time-inspector > span {
+  color: var(--relay-muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.profile-time-inspector > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.profile-time-inspector em {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--relay-muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.profile-time-inspector i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.profile-time-series-chart {
+  width: 100%;
+  min-height: 210px;
+  border: 1px solid var(--relay-border-soft);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--relay-surface) 84%, var(--relay-surface-soft)) 0%, var(--relay-surface) 100%);
+  cursor: crosshair;
+}
+
+.profile-time-series-line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.8;
+}
+
+.profile-outcome-context {
+  align-content: start;
+  display: grid;
+  gap: 14px;
+}
+
+.profile-outcome-context-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.profile-outcome-context-grid > div {
+  display: grid;
+  gap: 5px;
+  min-height: 88px;
+  border: 1px solid var(--relay-border-soft);
+  border-radius: 10px;
+  background: var(--relay-surface-soft);
+  padding: 12px;
+}
+
+.profile-outcome-context-grid span {
+  color: var(--relay-muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.profile-outcome-context-grid strong {
+  color: var(--relay-text);
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.profile-outcome-context-grid em {
+  color: var(--relay-muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+}
+
 .profile-trend-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1144,6 +1340,43 @@ button:disabled {
 
 .profile-empty-state {
   margin-top: 14px;
+}
+
+.profile-answer-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--relay-border-soft);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--relay-primary-soft) 38%, var(--relay-surface)) 0%, var(--relay-surface) 100%);
+  padding: 14px;
+}
+
+.profile-answer-card div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.profile-answer-card span {
+  color: var(--relay-muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.profile-answer-card strong {
+  color: var(--relay-text);
+  font-size: 18px;
+  line-height: 1.15;
+}
+
+.profile-answer-card p {
+  margin: 0;
+  color: var(--relay-muted);
+  font-size: 13px;
 }
 
 .collapsed-search-bar {
@@ -3554,6 +3787,28 @@ tbody tr:last-child td {
   }
 
   .selected-pitch-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-time-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-time-heading,
+  .profile-time-selected-heading {
+    display: grid;
+  }
+
+  .profile-time-controls,
+  .profile-time-inspector {
+    justify-items: start;
+  }
+
+  .profile-time-inspector > div {
+    justify-content: flex-start;
+  }
+
+  .profile-outcome-context-grid {
     grid-template-columns: 1fr;
   }
 

@@ -83,21 +83,29 @@ type CompareAnswerSnapshot = {
   visiblePitchTypes: string[];
 };
 
+type ProfileAnswerSnapshot = {
+  pitcherId: string;
+  pitcherName: string;
+  season: string;
+  pitchType: string;
+};
+
 type HomeAnswer = {
   id: string;
-  view: "explorer" | "compare";
+  view: "explorer" | "compare" | "profile";
   target: string;
   query: string;
   createdAt: number;
   explorer?: ExplorerAnswerSnapshot;
   compare?: CompareAnswerSnapshot;
+  profile?: ProfileAnswerSnapshot;
 };
 type StoredQuery = {
   id: string;
   query: string;
   skill: RelaySkillCall["skill"];
   target: string;
-  view: "explorer" | "compare";
+  view: "explorer" | "compare" | "profile";
   created_at: string;
 };
 type SortDirection = "asc" | "desc";
@@ -552,6 +560,7 @@ function battedBallQualityMessage(metrics: DataQualityMetric[]) {
   return `Batted-ball metrics are based on ${battedBall.available_count} of ${countLabel(
     battedBall.denominator_count,
     "ball in play",
+    "balls in play",
   )} for these filters.`;
 }
 
@@ -1746,6 +1755,7 @@ function App() {
     if (skill === "get_pitch_heatmap") return "Heatmap";
     if (skill === "compare_pitcher_periods") return "Compare";
     if (skill === "summarize_arsenal") return "Arsenal Summary";
+    if (skill === "open_pitcher_profile") return "Pitcher Profile";
     return "Movement Summary";
   }
 
@@ -1764,6 +1774,8 @@ function App() {
       period_tables: "Period Tables",
       period_heatmaps: "Period Heatmaps",
       drilldown: "Drilldown",
+      profile: "Pitcher Profile",
+      trends: "Pitch Trends",
     };
     return labels[target] ?? target.replaceAll("_", " ");
   }
@@ -1779,6 +1791,7 @@ function App() {
       return "Apply & Compare";
     }
 
+    if (call.skill === "open_pitcher_profile") return "Open Pitcher Profile";
     if (focus) return `Show ${focusLabel(focus)}`;
     if (call.skill === "get_pitch_heatmap") return "Show Heatmap";
     if (call.skill === "summarize_arsenal") return "Show Arsenal";
@@ -1923,7 +1936,7 @@ function App() {
   }
 
   function isExplorerSkill(skill: RelaySkillCall["skill"]) {
-    return skill !== "compare_pitcher_periods";
+    return skill !== "compare_pitcher_periods" && skill !== "open_pitcher_profile";
   }
 
   function skillFocus(args: RelaySkillCall["args"]) {
@@ -1932,12 +1945,18 @@ function App() {
   }
 
   function storedQueryFromSkillCall(query: string, call: RelaySkillCall): StoredQuery {
+    const view =
+      call.skill === "compare_pitcher_periods"
+        ? "compare"
+        : call.skill === "open_pitcher_profile"
+          ? "profile"
+          : "explorer";
     return {
       id: crypto.randomUUID(),
       query,
       skill: call.skill,
       target: skillFocus(call.args),
-      view: isExplorerSkill(call.skill) ? "explorer" : "compare",
+      view,
       created_at: new Date().toISOString(),
     };
   }
@@ -2212,6 +2231,25 @@ function App() {
     const focus = skillFocus(skillCall.args);
     const queryText = askQuery.trim();
     setLastAppliedQuery(queryText);
+
+    if (skillCall.skill === "open_pitcher_profile") {
+      const profile = openPitcherProfileFromContext({
+        pitcherName: typeof skillCall.args.pitcher_name === "string" ? skillCall.args.pitcher_name : "",
+        season: skillCall.args.season ? String(skillCall.args.season) : "",
+        pitchType: skillCall.args.pitch_type ? String(skillCall.args.pitch_type) : "",
+        appliedQuery: queryText,
+      });
+
+      if (profile) {
+        appendHomeAnswer({
+          view: "profile",
+          target: skillFocus(skillCall.args) || "profile",
+          query: queryText,
+          profile,
+        });
+      }
+      return;
+    }
 
     if (skillCall.skill === "compare_pitcher_periods") {
       const shouldFocusAnswer = Boolean(focus);
@@ -2876,6 +2914,88 @@ function App() {
     setActiveView("compare");
   }
 
+  function openExplorerPitcherProfile() {
+    const pitcher = resolvableExplorerPitcher();
+    if (!pitcher) {
+      setSearchError("Choose a cached pitcher before opening a profile.");
+      return;
+    }
+    const pitchType = typeof filters.pitch_type === "string" && !filters.pitch_type.includes(",")
+      ? filters.pitch_type
+      : "";
+    openPitcherProfileFromContext({
+      pitcher,
+      season: filters.season ?? "",
+      pitchType,
+    });
+  }
+
+  function openComparePitcherProfile() {
+    const pitcher = resolvableComparePitcher();
+    if (!pitcher) {
+      setCompareError("Choose a cached pitcher before opening a profile.");
+      return;
+    }
+    const pitchType = compareFilters.pitch_type && !compareFilters.pitch_type.includes(",")
+      ? compareFilters.pitch_type
+      : "";
+    const season = compareFilters.b_end
+      ? compareFilters.b_end.slice(0, 4)
+      : compareFilters.a_end
+        ? compareFilters.a_end.slice(0, 4)
+        : "";
+    openPitcherProfileFromContext({
+      pitcher,
+      season,
+      pitchType,
+    });
+  }
+
+  function openPitcherProfileFromContext({
+    pitcher,
+    pitcherName,
+    season = "",
+    pitchType = "",
+    appliedQuery = "",
+  }: {
+    pitcher?: CachedPitcher | null;
+    pitcherName?: string;
+    season?: string;
+    pitchType?: string;
+    appliedQuery?: string;
+  }) {
+    const match = pitcher ?? (pitcherName ? bestPitcherNameMatch(pitcherName) : null);
+    if (!match) {
+      setAskNotice("Choose a cached pitcher before opening a profile.");
+      setActiveView("profile");
+      return null;
+    }
+
+    const seasonOptions = profileSeasonOptions(match);
+    const activeSeason = seasonOptions.includes(season) ? season : latestProfileSeason(match);
+    setProfilePitcherId(String(match.pitcher));
+    setProfilePitcherName(formatPersonName(match.player_name));
+    setProfileSeason(activeSeason);
+    setProfilePitchType(pitchType);
+    setProfilePitches([]);
+    setProfileTotalPitchCount(0);
+    setProfileSeasonPitches({});
+    setProfileSeasonPitchCounts({});
+    setProfileLoadedSeasonCount(0);
+    setProfileLoadingSeasonCount(0);
+    setProfileError(null);
+    setLastAppliedQuery(appliedQuery);
+    setActiveView("profile");
+    void loadPitcherProfileForPitcher(match, activeSeason);
+
+    return {
+      pitcherId: String(match.pitcher),
+      pitcherName: formatPersonName(match.player_name),
+      season: activeSeason,
+      pitchType,
+    };
+  }
+
   function renderPitchFilterField(field: FilterField) {
     if (field.name === "pitcher_name") {
       return (
@@ -3211,12 +3331,25 @@ function App() {
 
     return [
       `${formatPersonName(firstPitcher.player_name)} fastballs over 97 to left handed hitters`,
+      `show ${formatPersonName(firstPitcher.player_name)} ${latestProfileSeason(firstPitcher)} profile`,
       `${formatPersonName(secondPitcher.player_name)} breaking balls with runners on`,
       `compare ${formatPersonName(multiSeasonPitcher.player_name)} ${comparePitchPhrase} previous season vs current season same span`,
     ];
   }, [cacheMetadata?.pitch_types, pitchers]);
 
   function openHomeAnswer(answer: HomeAnswer) {
+    if (answer.view === "profile" && answer.profile) {
+      const pitcher = pitchers.find((candidate) => String(candidate.pitcher) === answer.profile?.pitcherId);
+      openPitcherProfileFromContext({
+        pitcher,
+        pitcherName: answer.profile.pitcherName,
+        season: answer.profile.season,
+        pitchType: answer.profile.pitchType,
+        appliedQuery: answer.query,
+      });
+      return;
+    }
+
     if (answer.view === "explorer" && answer.explorer) {
       setFilters(answer.explorer.filters);
       setResults(answer.explorer.results);
@@ -3525,6 +3658,26 @@ function App() {
   }
 
   function renderHomeAnswerContent(answer: HomeAnswer) {
+    if (answer.view === "profile") {
+      const profile = answer.profile;
+      if (!profile) return null;
+      return (
+        <section className="profile-answer-card">
+          <div>
+            <span>Pitcher Profile</span>
+            <strong>{profile.pitcherName}</strong>
+            <p>
+              {profile.season ? `${profile.season} season` : "Latest cached season"}
+              {profile.pitchType ? ` | ${formatPitchTypeWithCode(profile.pitchType)}` : ""}
+            </p>
+          </div>
+          <button className="secondary-button" onClick={() => openHomeAnswer(answer)} type="button">
+            Open Pitcher Profile
+          </button>
+        </section>
+      );
+    }
+
     return answer.view === "compare"
       ? renderHomeCompareAnswer(answer)
       : renderHomeExplorerAnswer(answer);
@@ -3548,7 +3701,9 @@ function App() {
 
   function storedQueryMeta(query: StoredQuery) {
     const target = query.target ? focusLabel(query.target) : skillNameLabel(query.skill);
-    return `${query.view === "compare" ? "Compare" : "Explorer"} | ${target}`;
+    const viewLabel =
+      query.view === "compare" ? "Compare" : query.view === "profile" ? "Pitcher Profile" : "Explorer";
+    return `${viewLabel} | ${target}`;
   }
 
   function renderStoredQueryGroup(title: string, queries: StoredQuery[], canRemove = false) {
@@ -3625,7 +3780,7 @@ function App() {
           }}
           type="button"
         >
-          Profile
+          Pitcher Profile
         </button>
         <button
           className={activeView === "explorer" ? "view-tab is-active" : "view-tab"}
@@ -3753,7 +3908,7 @@ function App() {
                         onClick={() => openHomeAnswer(answer)}
                         type="button"
                       >
-                        Open Full {answer.view === "compare" ? "Compare" : "Explorer"}
+                        Open Full {answer.view === "compare" ? "Compare" : answer.view === "profile" ? "Pitcher Profile" : "Explorer"}
                       </button>
                       <button
                         aria-label={`Remove ${focusLabel(answer.target)} answer`}
@@ -3838,6 +3993,7 @@ function App() {
           removePitchFilter,
           isSearching,
           clearPitchFilters,
+          openExplorerPitcherProfile,
           handleSearch,
           searchError,
           totalResultCount,
@@ -3895,6 +4051,7 @@ function App() {
           isComparing,
           canCompare,
           clearCompareFilters,
+          openComparePitcherProfile,
           compareError,
           comparison,
           searchFiltersPitcherName,

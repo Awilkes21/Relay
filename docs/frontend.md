@@ -31,7 +31,7 @@ frontend/src/components/CompareDeltaHeatmap.tsx
 The app has four top-level views:
 
 - Home: Ask Relay natural-language entry
-- Profile: cached pitcher overview, arsenal, and game trends
+- Pitcher Profile: cached pitcher overview, arsenal, and game trends
 - Pitch Explorer: full pitch search and visualization workbench
 - Compare: pitcher period comparison workbench
 
