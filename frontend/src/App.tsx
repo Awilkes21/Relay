@@ -27,6 +27,7 @@ import {
 import PitchExplorerView from "./views/PitchExplorerView";
 import CompareView from "./views/CompareView";
 import PitcherProfileView from "./views/PitcherProfileView";
+import DataView from "./views/DataView";
 import MovementChart from "./components/MovementChart";
 import PitchHeatmap from "./components/PitchHeatmap";
 import StrikeZoneChart from "./components/StrikeZoneChart";
@@ -39,7 +40,7 @@ import { countLabel } from "./text";
 import "./App.css";
 
 type BackendStatus = "checking" | "connected" | "error";
-type ActiveView = "home" | "profile" | "explorer" | "compare";
+type ActiveView = "home" | "data" | "profile" | "explorer" | "compare";
 type ThemeMode = "light" | "dark";
 type ComparePreset =
   | "last30_previous30"
@@ -266,7 +267,7 @@ const pitchUrlFields = Object.keys(initialFilters) as Array<keyof PitchFilters>;
 const compareUrlFields = Object.keys(initialCompareFilters) as Array<keyof CompareFilters>;
 
 function validActiveView(value: string | null): ActiveView {
-  return value === "profile" || value === "explorer" || value === "compare" || value === "home" ? value : "home";
+  return value === "data" || value === "profile" || value === "explorer" || value === "compare" || value === "home" ? value : "home";
 }
 
 function validHeatmapMode(value: string | null): HeatmapMode {
@@ -890,6 +891,7 @@ function App() {
   const [pitchers, setPitchers] = useState<CachedPitcher[]>([]);
   const [pitcherError, setPitcherError] = useState<string | null>(null);
   const [cacheMetadata, setCacheMetadata] = useState<CacheMetadataResponse | null>(null);
+  const [isDataRefreshing, setIsDataRefreshing] = useState(false);
   const [profilePitcherId, setProfilePitcherId] = useState(initialRoute.profilePitcherId);
   const [profilePitcherName, setProfilePitcherName] = useState(initialRoute.profilePitcherName);
   const [profileSeason, setProfileSeason] = useState(initialRoute.profileSeason);
@@ -1081,27 +1083,41 @@ function App() {
     return () => window.removeEventListener("keydown", clearSelection);
   }, []);
 
-  useEffect(() => {
-    getPitchers()
-      .then((response) => {
-        setPitchers(response.results);
-        setPitcherError(null);
-      })
-      .catch((error: Error) => {
-        setPitchers([]);
-        setPitcherError(error.message);
-      });
-  }, []);
+  async function refreshCacheData() {
+    setIsDataRefreshing(true);
+    const [pitcherResult, metadataResult] = await Promise.allSettled([
+      getPitchers(),
+      getCacheMetadata(),
+    ]);
+
+    if (pitcherResult.status === "fulfilled") {
+      setPitchers(pitcherResult.value.results);
+      setPitcherError(null);
+    } else {
+      setPitchers([]);
+      setPitcherError(pitcherResult.reason instanceof Error ? pitcherResult.reason.message : "Cached pitchers failed to load");
+    }
+
+    if (metadataResult.status === "fulfilled") {
+      setCacheMetadata(metadataResult.value);
+    } else {
+      setCacheMetadata(null);
+    }
+
+    setIsDataRefreshing(false);
+  }
 
   useEffect(() => {
-    getCacheMetadata()
-      .then((metadata) => setCacheMetadata(metadata))
-      .catch(() => setCacheMetadata(null));
+    void refreshCacheData();
   }, []);
 
   useEffect(() => {
     if (didAutoRunRoute) return;
     if (initialRoute.activeView === "home") {
+      setDidAutoRunRoute(true);
+      return;
+    }
+    if (initialRoute.activeView === "data") {
       setDidAutoRunRoute(true);
       return;
     }
@@ -3507,7 +3523,7 @@ function App() {
                 <strong>{formatQualityRate(metric.available_rate)}</strong>
                 <small>
                   {metric.available_count} of {metric.denominator_count}{" "}
-                  {metric.denominator === "balls_in_play" ? "BIP" : "pitches"} available
+                  {metric.denominator === "balls_in_play" ? "balls in play" : "pitches"} available
                 </small>
                 <small>{formatQualityRate(metric.missing_rate)} missing</small>
               </div>
@@ -3774,6 +3790,15 @@ function App() {
           Home
         </button>
         <button
+          className={activeView === "data" ? "view-tab is-active" : "view-tab"}
+          onClick={() => {
+            setActiveView("data");
+          }}
+          type="button"
+        >
+          Data
+        </button>
+        <button
           className={activeView === "profile" ? "view-tab is-active" : "view-tab"}
           onClick={() => {
             setActiveView("profile");
@@ -3940,6 +3965,20 @@ function App() {
           <option key={event} value={event} label={formatEvent(event)} />
         ))}
       </datalist>
+
+      <DataView
+        cacheMetadata={cacheMetadata}
+        formatDate={formatDate}
+        formatPersonName={formatPersonName}
+        hidden={activeView !== "data"}
+        isRefreshing={isDataRefreshing}
+        onOpenPitcherProfile={(pitcher) => openPitcherProfileFromContext({ pitcher })}
+        onRefresh={() => {
+          void refreshCacheData();
+        }}
+        pitcherError={pitcherError}
+        pitchers={pitchers}
+      />
 
       <PitcherProfileView
         hidden={activeView !== "profile"}

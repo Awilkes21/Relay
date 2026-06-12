@@ -73,6 +73,9 @@ body,
 .table-disclosure-bar,
 .profile-hero,
 .profile-hero-metrics > div,
+.data-cache-facts > div,
+.data-command-list > div,
+.data-pitcher-row,
 .pitcher-combobox-menu,
 .pitcher-combobox-option,
 .compare-step,
@@ -735,6 +738,12 @@ button:disabled {
   font-size: 26px;
 }
 
+.section-heading p {
+  margin: 4px 0 0;
+  color: var(--relay-muted);
+  font-size: 14px;
+}
+
 .section-heading span {
   color: var(--relay-muted);
   font-size: 14px;
@@ -1377,6 +1386,161 @@ button:disabled {
   margin: 0;
   color: var(--relay-muted);
   font-size: 13px;
+}
+
+.data-view {
+  display: grid;
+  gap: 18px;
+}
+
+.data-view[hidden] {
+  display: none;
+}
+
+.data-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.data-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+  gap: 18px;
+}
+
+.data-cache-panel {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.data-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.data-chip-list span {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  border: 1px solid var(--relay-border-soft);
+  border-radius: 999px;
+  background: var(--relay-surface-soft);
+  color: var(--relay-muted);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 5px 9px;
+}
+
+.data-cache-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.data-cache-facts > div,
+.data-command-list > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  border: 1px solid var(--relay-border-soft);
+  border-radius: 10px;
+  background: var(--relay-surface-soft);
+  padding: 12px;
+}
+
+.data-cache-facts span,
+.data-command-list span {
+  color: var(--relay-muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.data-cache-facts strong {
+  color: var(--relay-text);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.data-command-list {
+  display: grid;
+  gap: 10px;
+}
+
+.data-command-list code {
+  color: var(--relay-text);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.data-helper-copy {
+  margin: 0;
+  color: var(--relay-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.data-pitcher-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.data-pitcher-search {
+  display: grid;
+  gap: 6px;
+  min-width: min(300px, 100%);
+}
+
+.data-pitcher-search span {
+  color: var(--relay-muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.data-pitcher-search input {
+  min-height: 38px;
+  border: 1px solid var(--relay-border);
+  border-radius: 10px;
+  background: var(--relay-surface);
+  color: var(--relay-text);
+  padding: 8px 10px;
+}
+
+.data-pitcher-list {
+  display: grid;
+  gap: 8px;
+}
+
+.data-pitcher-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--relay-border-soft);
+  border-radius: 12px;
+  background: var(--relay-surface-soft);
+  padding: 12px;
+}
+
+.data-pitcher-row > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.data-pitcher-row strong {
+  color: var(--relay-text);
+  font-size: 15px;
+}
+
+.data-pitcher-row span {
+  color: var(--relay-muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .collapsed-search-bar {
@@ -3776,10 +3940,16 @@ tbody tr:last-child td {
 @media (max-width: 1100px) {
   .comparison-summary,
   .data-quality-grid,
+  .data-overview-grid,
+  .data-cache-facts,
   .no-results-diagnostics-grid,
   .drilldown-summary-grid,
   .profile-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .data-layout {
+    grid-template-columns: 1fr;
   }
 
   .profile-trend-grid {
@@ -3885,6 +4055,19 @@ tbody tr:last-child td {
 
   .no-results-diagnostics-grid {
     grid-template-columns: 1fr;
+  }
+
+  .data-overview-grid,
+  .data-cache-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .data-pitcher-row {
+    display: grid;
+  }
+
+  .data-pitcher-row .secondary-button {
+    justify-self: start;
   }
 
   .focused-answer-header p {

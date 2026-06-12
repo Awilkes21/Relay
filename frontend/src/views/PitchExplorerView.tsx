@@ -152,7 +152,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
   }
 
   function qualityScopeLabel(scope: string) {
-    return scope === "balls_in_play" ? "BIP" : "pitches";
+    return scope === "balls_in_play" ? "balls in play" : "pitches";
   }
 
   function renderNoResultsDiagnostics() {
