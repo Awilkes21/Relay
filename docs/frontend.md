@@ -35,6 +35,8 @@ The app has three top-level views:
 
 The Home query flow can produce focused results. A focused result shows only the requested chart/table/summary and keeps the query visible as context. The user can click `Open Full Explorer` or `Open Full Compare` to continue with the same filters in the full workbench.
 
+Explorer and Compare state is reflected in the URL. Workbench links can be bookmarked or shared with the active view, filters, period fields, and heatmap mode intact. When a shared Explorer or Compare URL has enough cached pitcher/date context, Relay runs the matching search or comparison after cached pitchers load.
+
 ## Ask Relay Flow
 
 1. User submits a natural-language query.
@@ -48,6 +50,8 @@ The Home query flow can produce focused results. A focused result shows only the
    - `Compare Movement`
 6. Frontend calls the normal API endpoints for the skill.
 7. Result appears as a focused answer or in the full workbench.
+
+Successful Ask Relay parses are kept as recent questions in local storage. Parsed questions can also be saved from the preview and reused from the Home view.
 
 ## Pitch Explorer
 

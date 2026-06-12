@@ -89,6 +89,14 @@ type HomeAnswer = {
   explorer?: ExplorerAnswerSnapshot;
   compare?: CompareAnswerSnapshot;
 };
+type StoredQuery = {
+  id: string;
+  query: string;
+  skill: RelaySkillCall["skill"];
+  target: string;
+  view: "explorer" | "compare";
+  created_at: string;
+};
 type SortDirection = "asc" | "desc";
 type PitchSortKey =
   | "game_date"
@@ -223,6 +231,131 @@ const initialCompareFilters: CompareFilters = {
   b_start: "",
   b_end: "",
 };
+
+type RouteState = {
+  activeView: ActiveView;
+  pitchFilters: PitchFilters;
+  compareFilters: CompareFilters;
+  heatmapMode: HeatmapMode;
+  compareHeatmapMode: HeatmapMode;
+  hasPitchFilters: boolean;
+  hasCompareFilters: boolean;
+};
+
+const RECENT_QUERIES_STORAGE_KEY = "relay.recentQueries";
+const SAVED_QUERIES_STORAGE_KEY = "relay.savedQueries";
+const MAX_STORED_QUERIES = 8;
+
+const pitchUrlFields = Object.keys(initialFilters) as Array<keyof PitchFilters>;
+const compareUrlFields = Object.keys(initialCompareFilters) as Array<keyof CompareFilters>;
+
+function validActiveView(value: string | null): ActiveView {
+  return value === "explorer" || value === "compare" || value === "home" ? value : "home";
+}
+
+function validHeatmapMode(value: string | null): HeatmapMode {
+  return value === "whiffs" || value === "hard_contact" || value === "in_zone" ? value : "all";
+}
+
+function pitchFiltersFromParams(params: URLSearchParams) {
+  const nextFilters: PitchFilters = { ...initialFilters };
+  let hasFilters = false;
+
+  pitchUrlFields.forEach((field) => {
+    const value = params.get(field);
+    if (value !== null) {
+      nextFilters[field] = value;
+      hasFilters = true;
+    }
+  });
+
+  if (nextFilters.count && (!nextFilters.balls || !nextFilters.strikes)) {
+    const [balls, strikes] = nextFilters.count.split("-");
+    nextFilters.balls = balls ?? "";
+    nextFilters.strikes = strikes ?? "";
+  }
+
+  return { filters: nextFilters, hasFilters };
+}
+
+function compareFiltersFromParams(params: URLSearchParams) {
+  const nextFilters: CompareFilters = { ...initialCompareFilters };
+  let hasFilters = false;
+
+  compareUrlFields.forEach((field) => {
+    const value = params.get(field);
+    if (value !== null) {
+      nextFilters[field] = value;
+      hasFilters = true;
+    }
+  });
+
+  return { filters: nextFilters, hasFilters };
+}
+
+function readRouteState(): RouteState {
+  const params = new URLSearchParams(window.location.search);
+  const activeView = validActiveView(params.get("view"));
+  const pitchRoute = pitchFiltersFromParams(params);
+  const compareRoute = compareFiltersFromParams(params);
+
+  return {
+    activeView,
+    pitchFilters: pitchRoute.filters,
+    compareFilters: compareRoute.filters,
+    heatmapMode: validHeatmapMode(params.get("mode")),
+    compareHeatmapMode: validHeatmapMode(params.get("mode")),
+    hasPitchFilters: pitchRoute.hasFilters,
+    hasCompareFilters: compareRoute.hasFilters,
+  };
+}
+
+function appendFilterParams<T extends Record<string, string | string[] | undefined>>(
+  params: URLSearchParams,
+  filters: T,
+  initialValues: T,
+) {
+  Object.entries(filters).forEach(([key, value]) => {
+    const serializedValue = Array.isArray(value) ? value.filter(Boolean).join(",") : value?.trim();
+    const initialValue = initialValues[key]?.toString() ?? "";
+    if (serializedValue && serializedValue !== initialValue) {
+      params.set(key, serializedValue);
+    }
+  });
+}
+
+function routeUrl(
+  activeView: ActiveView,
+  pitchFilters: PitchFilters,
+  compareFilters: CompareFilters,
+  heatmapMode: HeatmapMode,
+  compareHeatmapMode: HeatmapMode,
+) {
+  const params = new URLSearchParams();
+  if (activeView !== "home") params.set("view", activeView);
+
+  if (activeView === "explorer") {
+    appendFilterParams(params, pitchFilters, initialFilters);
+    if (heatmapMode !== "all") params.set("mode", heatmapMode);
+  }
+
+  if (activeView === "compare") {
+    appendFilterParams(params, compareFilters, initialCompareFilters);
+    if (compareHeatmapMode !== "all") params.set("mode", compareHeatmapMode);
+  }
+
+  const query = params.toString();
+  return `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+}
+
+function readStoredQueries(key: string): StoredQuery[] {
+  try {
+    const stored = window.localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+}
 
 const compareFields = [
   { name: "a_game", label: "Period 1 Game", type: "select", required: false },
@@ -697,18 +830,19 @@ function averageNumbers(values: number[]) {
 }
 
 function App() {
+  const initialRoute = useMemo(() => readRouteState(), []);
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("checking");
   const [statusText, setStatusText] = useState("Checking backend...");
-  const [activeView, setActiveView] = useState<ActiveView>("home");
+  const [activeView, setActiveView] = useState<ActiveView>(initialRoute.activeView);
   const [theme, setTheme] = useState<ThemeMode>(() =>
     window.localStorage.getItem("relay.theme") === "dark" ? "dark" : "light",
   );
-  const [filters, setFilters] = useState<PitchFilters>(initialFilters);
+  const [filters, setFilters] = useState<PitchFilters>(initialRoute.pitchFilters);
   const [results, setResults] = useState<PitchResult[]>([]);
   const [resultCount, setResultCount] = useState(0);
   const [totalResultCount, setTotalResultCount] = useState(0);
   const [heatmap, setHeatmap] = useState<PitchHeatmapResponse | null>(null);
-  const [heatmapMode, setHeatmapMode] = useState<HeatmapMode>("all");
+  const [heatmapMode, setHeatmapMode] = useState<HeatmapMode>(initialRoute.heatmapMode);
   const [resultDataQualityMetrics, setResultDataQualityMetrics] = useState<DataQualityMetric[]>([]);
   const [dataQualityPitchCount, setDataQualityPitchCount] = useState(0);
   const [noResultsDiagnostics, setNoResultsDiagnostics] = useState<NoResultsDiagnostic[]>([]);
@@ -727,7 +861,7 @@ function App() {
   const [compareOptions, setCompareOptions] = useState<PitchFilterOptions>(emptyPitchOptions);
   const [pitchOptionsError, setPitchOptionsError] = useState<string | null>(null);
   const [compareFilters, setCompareFilters] = useState<CompareFilters>(
-    initialCompareFilters,
+    initialRoute.compareFilters,
   );
   const [comparison, setComparison] = useState<PitcherCompareResponse | null>(
     null,
@@ -737,13 +871,15 @@ function App() {
   const [comparePitchTypes, setComparePitchTypes] = useState<string[]>([]);
   const [compareHeatmapA, setCompareHeatmapA] = useState<PitchHeatmapResponse | null>(null);
   const [compareHeatmapB, setCompareHeatmapB] = useState<PitchHeatmapResponse | null>(null);
-  const [compareHeatmapMode, setCompareHeatmapMode] = useState<HeatmapMode>("all");
+  const [compareHeatmapMode, setCompareHeatmapMode] = useState<HeatmapMode>(initialRoute.compareHeatmapMode);
   const [isCompareHeatmapLoading, setIsCompareHeatmapLoading] = useState(false);
   const [drilldownPitchType, setDrilldownPitchType] = useState<string | null>(null);
   const [drilldownA, setDrilldownA] = useState<PitchResult[]>([]);
   const [drilldownB, setDrilldownB] = useState<PitchResult[]>([]);
   const [isDrilldownLoading, setIsDrilldownLoading] = useState(false);
   const [savedComparisons, setSavedComparisons] = useState<SavedComparison[]>([]);
+  const [recentQueries, setRecentQueries] = useState<StoredQuery[]>([]);
+  const [savedQueries, setSavedQueries] = useState<StoredQuery[]>([]);
   const [comparisonName, setComparisonName] = useState("");
   const [askQuery, setAskQuery] = useState("");
   const [skillCall, setSkillCall] = useState<RelaySkillCall | null>(null);
@@ -756,6 +892,7 @@ function App() {
   const [homeAnswers, setHomeAnswers] = useState<HomeAnswer[]>([]);
   const [collapsedHomeAnswers, setCollapsedHomeAnswers] = useState<Record<string, boolean>>({});
   const [homeHeatmapLoading, setHomeHeatmapLoading] = useState<Record<string, boolean>>({});
+  const [didAutoRunRoute, setDidAutoRunRoute] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -793,8 +930,59 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem("relay.savedComparisons");
-    setSavedComparisons(stored ? JSON.parse(stored) : []);
+    try {
+      const stored = window.localStorage.getItem("relay.savedComparisons");
+      setSavedComparisons(stored ? JSON.parse(stored) : []);
+    } catch {
+      setSavedComparisons([]);
+    }
+    setRecentQueries(readStoredQueries(RECENT_QUERIES_STORAGE_KEY));
+    setSavedQueries(readStoredQueries(SAVED_QUERIES_STORAGE_KEY));
+  }, []);
+
+  useEffect(() => {
+    const nextUrl = routeUrl(activeView, filters, compareFilters, heatmapMode, compareHeatmapMode);
+    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (nextUrl !== currentUrl) {
+      window.history.replaceState(null, "", nextUrl);
+    }
+  }, [activeView, filters, compareFilters, heatmapMode, compareHeatmapMode]);
+
+  useEffect(() => {
+    function applyRouteFromHistory() {
+      const route = readRouteState();
+      setActiveView(route.activeView);
+      setHeatmapMode(route.heatmapMode);
+      setCompareHeatmapMode(route.compareHeatmapMode);
+
+      if (route.activeView === "explorer") {
+        setFilters(route.pitchFilters);
+        setResults([]);
+        setResultCount(0);
+        setTotalResultCount(0);
+        setHeatmap(null);
+        setResultDataQualityMetrics([]);
+        setDataQualityPitchCount(0);
+        setNoResultsDiagnostics([]);
+        setLastPitchSearchFilters(null);
+        setSearchError(null);
+      }
+
+      if (route.activeView === "compare") {
+        setCompareFilters(route.compareFilters);
+        setComparison(null);
+        setComparePitchTypes([]);
+        setCompareHeatmapA(null);
+        setCompareHeatmapB(null);
+        setCompareError(null);
+        setDrilldownPitchType(null);
+        setDrilldownA([]);
+        setDrilldownB([]);
+      }
+    }
+
+    window.addEventListener("popstate", applyRouteFromHistory);
+    return () => window.removeEventListener("popstate", applyRouteFromHistory);
   }, []);
 
   useEffect(() => {
@@ -827,6 +1015,37 @@ function App() {
       .then((metadata) => setCacheMetadata(metadata))
       .catch(() => setCacheMetadata(null));
   }, []);
+
+  useEffect(() => {
+    if (didAutoRunRoute) return;
+    if (initialRoute.activeView === "home") {
+      setDidAutoRunRoute(true);
+      return;
+    }
+    if (pitchers.length === 0) return;
+
+    if (initialRoute.activeView === "explorer") {
+      setDidAutoRunRoute(true);
+      if (initialRoute.hasPitchFilters && resolvableExplorerPitcher()) {
+        void runPitchSearch(filters, heatmapMode);
+      }
+      return;
+    }
+
+    if (initialRoute.activeView === "compare") {
+      setDidAutoRunRoute(true);
+      if (
+        initialRoute.hasCompareFilters &&
+        resolvableComparePitcher() &&
+        compareFilters.a_start &&
+        compareFilters.a_end &&
+        compareFilters.b_start &&
+        compareFilters.b_end
+      ) {
+        void runCompareSearch(compareFilters);
+      }
+    }
+  }, [compareFilters, didAutoRunRoute, filters, heatmapMode, initialRoute, pitchers]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -1580,7 +1799,9 @@ function App() {
     setAskError(null);
     setAskNotice(null);
     try {
-      setSkillCall(await parseNaturalLanguageQuery(query));
+      const parsedSkillCall = await parseNaturalLanguageQuery(query);
+      setSkillCall(parsedSkillCall);
+      rememberRecentQuery(query, parsedSkillCall);
     } catch (error) {
       setSkillCall(null);
       setAskError(error instanceof Error ? error.message : "Query parsing failed");
@@ -1596,6 +1817,66 @@ function App() {
   function skillFocus(args: RelaySkillCall["args"]) {
     const focus = args.focus;
     return typeof focus === "string" && focus.trim() ? focus.trim() : "";
+  }
+
+  function storedQueryFromSkillCall(query: string, call: RelaySkillCall): StoredQuery {
+    return {
+      id: crypto.randomUUID(),
+      query,
+      skill: call.skill,
+      target: skillFocus(call.args),
+      view: isExplorerSkill(call.skill) ? "explorer" : "compare",
+      created_at: new Date().toISOString(),
+    };
+  }
+
+  function storeQueries(
+    key: string,
+    setter: React.Dispatch<React.SetStateAction<StoredQuery[]>>,
+    query: StoredQuery,
+  ) {
+    setter((current) => {
+      const next = [
+        query,
+        ...current.filter((storedQuery) => storedQuery.query.trim().toLowerCase() !== query.query.trim().toLowerCase()),
+      ].slice(0, MAX_STORED_QUERIES);
+      window.localStorage.setItem(key, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function rememberRecentQuery(query: string, call: RelaySkillCall) {
+    storeQueries(
+      RECENT_QUERIES_STORAGE_KEY,
+      setRecentQueries,
+      storedQueryFromSkillCall(query, call),
+    );
+  }
+
+  function saveCurrentQuery() {
+    const query = askQuery.trim();
+    if (!query || !skillCall) return;
+    storeQueries(
+      SAVED_QUERIES_STORAGE_KEY,
+      setSavedQueries,
+      storedQueryFromSkillCall(query, skillCall),
+    );
+  }
+
+  function removeSavedQuery(queryId: string) {
+    setSavedQueries((current) => {
+      const next = current.filter((query) => query.id !== queryId);
+      window.localStorage.setItem(SAVED_QUERIES_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function useStoredQuery(query: StoredQuery) {
+    setAskQuery(query.query);
+    setSkillCall(null);
+    setAskError(null);
+    setAskNotice(null);
+    setActiveView("home");
   }
 
   function triggerExplorerFocus(target: string) {
@@ -2898,6 +3179,46 @@ function App() {
     setComparisonName("");
   }
 
+  function storedQueryMeta(query: StoredQuery) {
+    const target = query.target ? focusLabel(query.target) : skillNameLabel(query.skill);
+    return `${query.view === "compare" ? "Compare" : "Explorer"} | ${target}`;
+  }
+
+  function renderStoredQueryGroup(title: string, queries: StoredQuery[], canRemove = false) {
+    if (queries.length === 0) return null;
+
+    return (
+      <div className="query-library-group">
+        <span>{title}</span>
+        <div className="query-library-list">
+          {queries.map((query) => (
+            <div className="query-library-item" key={query.id}>
+              <button
+                className="query-library-button"
+                onClick={() => useStoredQuery(query)}
+                type="button"
+              >
+                <strong>{query.query}</strong>
+                <small>{storedQueryMeta(query)}</small>
+              </button>
+              {canRemove ? (
+                <button
+                  aria-label={`Remove saved query ${query.query}`}
+                  className="query-library-remove"
+                  onClick={() => removeSavedQuery(query.id)}
+                  title="Remove saved query"
+                  type="button"
+                >
+                  <Icon name="x" />
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <main className="app-shell">
       <header className="app-header">
@@ -2982,6 +3303,12 @@ function App() {
               </button>
             ))}
           </div>
+          {savedQueries.length > 0 || recentQueries.length > 0 ? (
+            <div className="query-library" aria-label="Saved and recent questions">
+              {renderStoredQueryGroup("Saved", savedQueries, true)}
+              {renderStoredQueryGroup("Recent", recentQueries)}
+            </div>
+          ) : null}
           {askError ? <div className="error-banner">{askError}</div> : null}
           {askNotice ? <div className="inline-note">{askNotice}</div> : null}
           {skillCall?.warnings.length ? (
@@ -2998,9 +3325,14 @@ function App() {
                   <span>Ready to Show</span>
                   <strong>{skillNameLabel(skillCall.skill)}</strong>
                 </div>
-                <button className="secondary-button" onClick={applySkillCall} type="button">
-                  {skillActionLabel(skillCall)}
-                </button>
+                <div className="skill-preview-actions">
+                  <button className="secondary-button" onClick={saveCurrentQuery} type="button">
+                    Save Query
+                  </button>
+                  <button className="secondary-button" onClick={applySkillCall} type="button">
+                    {skillActionLabel(skillCall)}
+                  </button>
+                </div>
               </div>
               {Object.keys(skillCall.args).length > 0 ? (
                 <div className="skill-args">
