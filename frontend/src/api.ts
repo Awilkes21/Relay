@@ -372,6 +372,28 @@ export async function searchPitches(filters: PitchFilters): Promise<PitchSearchR
   return response.json();
 }
 
+export async function getProfilePitches(filters: PitchFilters): Promise<PitchSearchResponse> {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    const trimmedValue = Array.isArray(value) ? value.filter(Boolean).join(",") : value?.trim();
+    if (trimmedValue && key !== "single_game" && key !== "count" && key !== "limit") {
+      params.set(key, trimmedValue);
+    }
+  });
+
+  const queryString = params.toString();
+  const response = await fetch(
+    `${API_URL}/pitches/profile${queryString ? `?${queryString}` : ""}`,
+  );
+
+  if (!response.ok) {
+    throw new Error(await responseError(response, `Profile pitches returned ${response.status}`));
+  }
+
+  return response.json();
+}
+
 export async function getPitchDataQuality(
   filters: PitchFilters,
 ): Promise<PitchDataQualityResponse> {

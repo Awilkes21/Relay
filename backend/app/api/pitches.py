@@ -200,6 +200,34 @@ def get_pitches(
     }
 
 
+@router.get("/pitches/profile")
+def get_profile_pitches(
+    filters: PitchFilterParams = Depends(),
+    result_order: ResultOrder = Query(default="oldest", pattern=RESULT_ORDER_PATTERN),
+) -> dict[str, Any]:
+    pitch_filters = filters.to_filters()
+    if not pitch_filters["season"]:
+        raise HTTPException(status_code=422, detail="season is required for profile pitches")
+    if not pitch_filters["pitcher_id"] and not pitch_filters["pitcher_name"]:
+        raise HTTPException(status_code=422, detail="pitcher_id or pitcher_name is required for profile pitches")
+
+    pitch_filters["result_order"] = result_order
+    pitch_filters["limit"] = None
+
+    try:
+        search_response = search_pitches(pitch_filters)
+        results = [_compact_pitch(row) for row in search_response["results"]]
+    except Exception as exc:
+        raise_service_error(exc)
+
+    return {
+        "count": len(results),
+        "total_count": search_response["total_count"],
+        "movement": MOVEMENT_METADATA,
+        "results": results,
+    }
+
+
 @router.get("/pitches/data-quality")
 def get_pitches_data_quality(filters: PitchFilterParams = Depends()) -> dict[str, Any]:
     try:

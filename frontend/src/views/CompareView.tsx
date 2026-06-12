@@ -3,6 +3,7 @@ import CompareDeltaHeatmap from "../components/CompareDeltaHeatmap";
 import CompareMovementChart from "../components/CompareMovementChart";
 import PitchHeatmap from "../components/PitchHeatmap";
 import Icon from "../components/Icon";
+import PitcherCombobox from "../components/PitcherCombobox";
 import { formatPitchType, formatPitchTypeWithCode } from "../pitchTypes";
 import { countLabel } from "../text";
 
@@ -31,11 +32,14 @@ function CompareView({ hidden, context }: CompareViewProps) {
   const {
     handleCompare,
     pitcherError,
+    pitchers,
     compareDateRange,
     formatDate,
+    formatPersonName,
     compareFilters,
     completePitcherName,
     updateCompareFilter,
+    selectComparePitcher,
     compareOptions,
     hasComparePresetRange,
     setComparePreset,
@@ -423,19 +427,19 @@ function CompareView({ hidden, context }: CompareViewProps) {
               <div className="filter-grid compare-filter-grid">
                 <label className="filter-field">
                   <span>Pitcher</span>
-                  <input
-                    list="cached-pitchers"
-                    name="pitcher_name"
-                    type="text"
-                    value={compareFilters.pitcher_name}
+                  <PitcherCombobox
+                    formatDate={formatShortDate}
+                    formatPersonName={formatPersonName}
+                    id="compare-pitcher-search"
                     onBlur={() => {
                       setCompareFilters((currentFilters: any) =>
                         completePitcherName(currentFilters),
                       );
                     }}
-                    onChange={(event) =>
-                      updateCompareFilter("pitcher_name", event.target.value)
-                    }
+                    onChange={(value) => updateCompareFilter("pitcher_name", value)}
+                    onSelect={selectComparePitcher}
+                    pitchers={pitchers}
+                    value={compareFilters.pitcher_name}
                   />
                 </label>
               </div>

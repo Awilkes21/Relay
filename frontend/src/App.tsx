@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   API_URL,
   type CachedPitcher,
@@ -20,23 +20,26 @@ import {
   getHealth,
   getPitchFilterOptions,
   getPitchers,
+  getProfilePitches,
   parseNaturalLanguageQuery,
   searchPitches,
 } from "./api";
 import PitchExplorerView from "./views/PitchExplorerView";
 import CompareView from "./views/CompareView";
+import PitcherProfileView from "./views/PitcherProfileView";
 import MovementChart from "./components/MovementChart";
 import PitchHeatmap from "./components/PitchHeatmap";
 import StrikeZoneChart from "./components/StrikeZoneChart";
 import CompareMovementChart from "./components/CompareMovementChart";
 import CompareDeltaHeatmap from "./components/CompareDeltaHeatmap";
 import Icon from "./components/Icon";
+import PitcherCombobox from "./components/PitcherCombobox";
 import { formatPitchType, formatPitchTypeWithCode } from "./pitchTypes";
 import { countLabel } from "./text";
 import "./App.css";
 
 type BackendStatus = "checking" | "connected" | "error";
-type ActiveView = "home" | "explorer" | "compare";
+type ActiveView = "home" | "profile" | "explorer" | "compare";
 type ThemeMode = "light" | "dark";
 type ComparePreset =
   | "last30_previous30"
@@ -236,10 +239,15 @@ type RouteState = {
   activeView: ActiveView;
   pitchFilters: PitchFilters;
   compareFilters: CompareFilters;
+  profilePitcherId: string;
+  profilePitcherName: string;
+  profileSeason: string;
+  profilePitchType: string;
   heatmapMode: HeatmapMode;
   compareHeatmapMode: HeatmapMode;
   hasPitchFilters: boolean;
   hasCompareFilters: boolean;
+  hasProfilePitcher: boolean;
 };
 
 const RECENT_QUERIES_STORAGE_KEY = "relay.recentQueries";
@@ -250,7 +258,7 @@ const pitchUrlFields = Object.keys(initialFilters) as Array<keyof PitchFilters>;
 const compareUrlFields = Object.keys(initialCompareFilters) as Array<keyof CompareFilters>;
 
 function validActiveView(value: string | null): ActiveView {
-  return value === "explorer" || value === "compare" || value === "home" ? value : "home";
+  return value === "profile" || value === "explorer" || value === "compare" || value === "home" ? value : "home";
 }
 
 function validHeatmapMode(value: string | null): HeatmapMode {
@@ -303,10 +311,15 @@ function readRouteState(): RouteState {
     activeView,
     pitchFilters: pitchRoute.filters,
     compareFilters: compareRoute.filters,
+    profilePitcherId: params.get("pitcher_id") ?? "",
+    profilePitcherName: params.get("pitcher_name") ?? "",
+    profileSeason: params.get("season") ?? "",
+    profilePitchType: params.get("pitch_type") ?? "",
     heatmapMode: validHeatmapMode(params.get("mode")),
     compareHeatmapMode: validHeatmapMode(params.get("mode")),
     hasPitchFilters: pitchRoute.hasFilters,
     hasCompareFilters: compareRoute.hasFilters,
+    hasProfilePitcher: Boolean(params.get("pitcher_id") || params.get("pitcher_name")),
   };
 }
 
@@ -328,6 +341,10 @@ function routeUrl(
   activeView: ActiveView,
   pitchFilters: PitchFilters,
   compareFilters: CompareFilters,
+  profilePitcherId: string,
+  profilePitcherName: string,
+  profileSeason: string,
+  profilePitchType: string,
   heatmapMode: HeatmapMode,
   compareHeatmapMode: HeatmapMode,
 ) {
@@ -342,6 +359,13 @@ function routeUrl(
   if (activeView === "compare") {
     appendFilterParams(params, compareFilters, initialCompareFilters);
     if (compareHeatmapMode !== "all") params.set("mode", compareHeatmapMode);
+  }
+
+  if (activeView === "profile") {
+    if (profilePitcherId.trim()) params.set("pitcher_id", profilePitcherId.trim());
+    if (profilePitcherName.trim()) params.set("pitcher_name", profilePitcherName.trim());
+    if (profileSeason.trim()) params.set("season", profileSeason.trim());
+    if (profilePitchType.trim()) params.set("pitch_type", profilePitchType.trim());
   }
 
   const query = params.toString();
@@ -857,6 +881,18 @@ function App() {
   const [pitchers, setPitchers] = useState<CachedPitcher[]>([]);
   const [pitcherError, setPitcherError] = useState<string | null>(null);
   const [cacheMetadata, setCacheMetadata] = useState<CacheMetadataResponse | null>(null);
+  const [profilePitcherId, setProfilePitcherId] = useState(initialRoute.profilePitcherId);
+  const [profilePitcherName, setProfilePitcherName] = useState(initialRoute.profilePitcherName);
+  const [profileSeason, setProfileSeason] = useState(initialRoute.profileSeason);
+  const [profilePitchType, setProfilePitchType] = useState(initialRoute.profilePitchType);
+  const [profilePitches, setProfilePitches] = useState<PitchResult[]>([]);
+  const [profileTotalPitchCount, setProfileTotalPitchCount] = useState(0);
+  const [profileSeasonPitches, setProfileSeasonPitches] = useState<Record<string, PitchResult[]>>({});
+  const [profileSeasonPitchCounts, setProfileSeasonPitchCounts] = useState<Record<string, number>>({});
+  const [profileLoadedSeasonCount, setProfileLoadedSeasonCount] = useState(0);
+  const [profileLoadingSeasonCount, setProfileLoadingSeasonCount] = useState(0);
+  const [isProfileLoading, setIsProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [pitchOptions, setPitchOptions] = useState<PitchFilterOptions>(emptyPitchOptions);
   const [compareOptions, setCompareOptions] = useState<PitchFilterOptions>(emptyPitchOptions);
   const [pitchOptionsError, setPitchOptionsError] = useState<string | null>(null);
@@ -893,6 +929,20 @@ function App() {
   const [collapsedHomeAnswers, setCollapsedHomeAnswers] = useState<Record<string, boolean>>({});
   const [homeHeatmapLoading, setHomeHeatmapLoading] = useState<Record<string, boolean>>({});
   const [didAutoRunRoute, setDidAutoRunRoute] = useState(false);
+  const profileLoadRequestId = useRef(0);
+
+  function toggleTheme() {
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    const documentWithTransition = document as Document & {
+      startViewTransition?: (callback: () => void) => { finished: Promise<void> };
+    };
+
+    if (documentWithTransition.startViewTransition) {
+      documentWithTransition.startViewTransition(() => setTheme(nextTheme));
+    } else {
+      setTheme(nextTheme);
+    }
+  }
 
   useEffect(() => {
     let isMounted = true;
@@ -941,12 +991,22 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const nextUrl = routeUrl(activeView, filters, compareFilters, heatmapMode, compareHeatmapMode);
+    const nextUrl = routeUrl(
+      activeView,
+      filters,
+      compareFilters,
+      profilePitcherId,
+      profilePitcherName,
+      profileSeason,
+      profilePitchType,
+      heatmapMode,
+      compareHeatmapMode,
+    );
     const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (nextUrl !== currentUrl) {
       window.history.replaceState(null, "", nextUrl);
     }
-  }, [activeView, filters, compareFilters, heatmapMode, compareHeatmapMode]);
+  }, [activeView, filters, compareFilters, profilePitcherId, profilePitcherName, profileSeason, profilePitchType, heatmapMode, compareHeatmapMode]);
 
   useEffect(() => {
     function applyRouteFromHistory() {
@@ -978,6 +1038,20 @@ function App() {
         setDrilldownPitchType(null);
         setDrilldownA([]);
         setDrilldownB([]);
+      }
+
+      if (route.activeView === "profile") {
+        setProfilePitcherId(route.profilePitcherId);
+        setProfilePitcherName(route.profilePitcherName);
+        setProfileSeason(route.profileSeason);
+        setProfilePitchType(route.profilePitchType);
+        setProfilePitches([]);
+        setProfileTotalPitchCount(0);
+        setProfileSeasonPitches({});
+        setProfileSeasonPitchCounts({});
+        setProfileLoadedSeasonCount(0);
+        setProfileLoadingSeasonCount(0);
+        setProfileError(null);
       }
     }
 
@@ -1032,6 +1106,14 @@ function App() {
       return;
     }
 
+    if (initialRoute.activeView === "profile") {
+      setDidAutoRunRoute(true);
+      if (initialRoute.hasProfilePitcher && resolvableProfilePitcher()) {
+        void loadPitcherProfile();
+      }
+      return;
+    }
+
     if (initialRoute.activeView === "compare") {
       setDidAutoRunRoute(true);
       if (
@@ -1045,7 +1127,7 @@ function App() {
         void runCompareSearch(compareFilters);
       }
     }
-  }, [compareFilters, didAutoRunRoute, filters, heatmapMode, initialRoute, pitchers]);
+  }, [compareFilters, didAutoRunRoute, filters, heatmapMode, initialRoute, pitchers, profilePitcherId, profilePitcherName, profileSeason, profilePitchType]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -1186,6 +1268,36 @@ function App() {
 
   function resolvableComparePitcher() {
     return selectedComparePitcher() ?? bestPitcherNameMatch(compareFilters.pitcher_name);
+  }
+
+  function selectedProfilePitcher() {
+    return pitchers.find((pitcher) =>
+      matchesPitcherInput(
+        pitcher,
+        profilePitcherId,
+        profilePitcherName,
+      ),
+    );
+  }
+
+  function resolvableProfilePitcher() {
+    return selectedProfilePitcher() ?? bestPitcherNameMatch(profilePitcherName);
+  }
+
+  function profileSeasonOptions(pitcher = resolvableProfilePitcher()) {
+    if (!pitcher) return [];
+    const firstYear = dateFromIso(pitcher.first_game_date).getFullYear();
+    const lastYear = dateFromIso(pitcher.last_game_date).getFullYear();
+    if (Number.isNaN(firstYear) || Number.isNaN(lastYear)) return [];
+
+    return Array.from(
+      { length: lastYear - firstYear + 1 },
+      (_unused, index) => String(lastYear - index),
+    );
+  }
+
+  function latestProfileSeason(pitcher = resolvableProfilePitcher()) {
+    return profileSeasonOptions(pitcher)[0] ?? "";
   }
 
   function buildNoResultsDiagnostics(
@@ -2267,6 +2379,31 @@ function App() {
     }));
   }
 
+  function selectExplorerPitcher(pitcher: CachedPitcher) {
+    setFilters((currentFilters) => ({
+      ...currentFilters,
+      pitcher_id: String(pitcher.pitcher),
+      pitcher_name: formatPersonName(pitcher.player_name),
+      season: "",
+      single_game: "",
+      start_date: "",
+      end_date: "",
+      pitch_type: "",
+      pitch_type_group: "",
+      count: "",
+      balls: "",
+      strikes: "",
+      min_velocity: "",
+      max_velocity: "",
+      batter_hand: "",
+      description: "",
+      events: "",
+      base_state: "",
+      count_group: "",
+      location_filter: "",
+    }));
+  }
+
   function updateCompareFilter(name: keyof CompareFilters, value: string) {
     setCompareFilters((currentFilters) => ({
       ...currentFilters,
@@ -2288,6 +2425,22 @@ function App() {
       ...(name === "b_game" ? { b_start: value, b_end: value } : {}),
       ...(name === "a_start" || name === "a_end" ? { a_game: "" } : {}),
       ...(name === "b_start" || name === "b_end" ? { b_game: "" } : {}),
+    }));
+  }
+
+  function selectComparePitcher(pitcher: CachedPitcher) {
+    setCompareFilters((currentFilters) => ({
+      ...currentFilters,
+      pitcher_id: String(pitcher.pitcher),
+      pitcher_name: formatPersonName(pitcher.player_name),
+      pitch_type: "",
+      batter_hand: "",
+      a_game: "",
+      a_start: "",
+      a_end: "",
+      b_game: "",
+      b_start: "",
+      b_end: "",
     }));
   }
 
@@ -2370,7 +2523,6 @@ function App() {
   }
 
   function datalistForFilter(name: keyof PitchFilters) {
-    if (name === "pitcher_name") return "cached-pitchers";
     if (name === "description") return "pitch-descriptions";
     if (name === "events") return "pitch-events";
     return undefined;
@@ -2524,7 +2676,227 @@ function App() {
     setDrilldownB([]);
   }
 
+  function updateProfilePitcher(value: string) {
+    setProfilePitcherName(value);
+    setProfilePitcherId("");
+    setProfileSeason("");
+    setProfilePitchType("");
+    setProfilePitches([]);
+    setProfileTotalPitchCount(0);
+    setProfileSeasonPitches({});
+    setProfileSeasonPitchCounts({});
+    setProfileLoadedSeasonCount(0);
+    setProfileLoadingSeasonCount(0);
+    setProfileError(null);
+  }
+
+  function selectProfilePitcher(pitcher: CachedPitcher) {
+    const season = latestProfileSeason(pitcher);
+    setProfilePitcherId(String(pitcher.pitcher));
+    setProfilePitcherName(formatPersonName(pitcher.player_name));
+    setProfileSeason(season);
+    setProfilePitchType("");
+    setProfilePitches([]);
+    setProfileTotalPitchCount(0);
+    setProfileSeasonPitches({});
+    setProfileSeasonPitchCounts({});
+    setProfileLoadedSeasonCount(0);
+    setProfileLoadingSeasonCount(0);
+    setProfileError(null);
+    void loadPitcherProfileForPitcher(pitcher, season);
+  }
+
+  function completeProfilePitcher() {
+    const match = resolvableProfilePitcher();
+    if (!match) return null;
+
+    setProfilePitcherId(String(match.pitcher));
+    setProfilePitcherName(formatPersonName(match.player_name));
+    setProfileSeason((currentSeason) =>
+      profileSeasonOptions(match).includes(currentSeason) ? currentSeason : latestProfileSeason(match),
+    );
+    return match;
+  }
+
+  function resolveAndLoadProfilePitcher() {
+    const pitcher = completeProfilePitcher();
+    if (!pitcher) return;
+
+    const pitcherId = String(pitcher.pitcher);
+    const hasCachedProfile =
+      profilePitcherId === pitcherId && Object.keys(profileSeasonPitches).length > 0;
+
+    if (!hasCachedProfile) {
+      void loadPitcherProfileForPitcher(pitcher);
+    }
+  }
+
+  function updateProfileSeason(season: string) {
+    const nextSeasonPitches = profileSeasonPitches[season] ?? [];
+    const shouldKeepPitchType =
+      Boolean(profilePitchType) &&
+      nextSeasonPitches.some((pitch) => (pitch.pitch_type ?? "Unknown") === profilePitchType);
+
+    setProfileSeason(season);
+    if (!shouldKeepPitchType) {
+      setProfilePitchType("");
+    }
+    setProfilePitches(nextSeasonPitches);
+    setProfileTotalPitchCount(profileSeasonPitchCounts[season] ?? 0);
+    setProfileError(null);
+  }
+
+  async function loadPitcherProfileForPitcher(
+    pitcher: CachedPitcher,
+    preferredSeason = profileSeason,
+  ) {
+    const seasonOptions = profileSeasonOptions(pitcher);
+    const activeSeason = seasonOptions.includes(preferredSeason)
+      ? preferredSeason
+      : seasonOptions[0] ?? "";
+
+    if (!activeSeason) {
+      setProfileError("Choose a season before loading a profile.");
+      setProfilePitches([]);
+      setProfileTotalPitchCount(0);
+      setProfileSeasonPitches({});
+      setProfileSeasonPitchCounts({});
+      setProfileLoadedSeasonCount(0);
+      setProfileLoadingSeasonCount(0);
+      return;
+    }
+
+    const requestId = profileLoadRequestId.current + 1;
+    profileLoadRequestId.current = requestId;
+
+    setProfilePitcherId(String(pitcher.pitcher));
+    setProfilePitcherName(formatPersonName(pitcher.player_name));
+    setProfileSeason(activeSeason);
+    setProfilePitches([]);
+    setProfileTotalPitchCount(0);
+    setProfileSeasonPitches({});
+    setProfileSeasonPitchCounts({});
+    setProfileLoadedSeasonCount(0);
+    setProfileLoadingSeasonCount(seasonOptions.length);
+    setIsProfileLoading(true);
+    setProfileError(null);
+
+    try {
+      const seasonResponses = await Promise.all(
+        seasonOptions.map(async (season) => {
+          const response = await getProfilePitches({
+            pitcher_id: String(pitcher.pitcher),
+            pitcher_name: "",
+            season,
+            result_order: "oldest",
+          });
+          if (profileLoadRequestId.current === requestId) {
+            setProfileLoadedSeasonCount((count) => count + 1);
+          }
+          return { season, response };
+        }),
+      );
+      if (profileLoadRequestId.current !== requestId) return;
+
+      const nextPitches = Object.fromEntries(
+        seasonResponses.map(({ season, response }) => [season, response.results]),
+      );
+      const nextCounts = Object.fromEntries(
+        seasonResponses.map(({ season, response }) => [season, response.total_count]),
+      );
+
+      setProfileSeasonPitches(nextPitches);
+      setProfileSeasonPitchCounts(nextCounts);
+      setProfilePitches(nextPitches[activeSeason] ?? []);
+      setProfileTotalPitchCount(nextCounts[activeSeason] ?? 0);
+      setProfileSeason(activeSeason);
+      setProfileLoadedSeasonCount(seasonOptions.length);
+    } catch (error) {
+      if (profileLoadRequestId.current !== requestId) return;
+      setProfilePitches([]);
+      setProfileTotalPitchCount(0);
+      setProfileSeasonPitches({});
+      setProfileSeasonPitchCounts({});
+      setProfileLoadedSeasonCount(0);
+      setProfileLoadingSeasonCount(0);
+      setProfileError(error instanceof Error ? error.message : "Profile failed to load");
+    } finally {
+      if (profileLoadRequestId.current === requestId) {
+        setIsProfileLoading(false);
+        setProfileLoadingSeasonCount(0);
+      }
+    }
+  }
+
+  async function loadPitcherProfile() {
+    const pitcher = completeProfilePitcher();
+    if (!pitcher) {
+      setProfileError("Choose a cached pitcher before loading a profile.");
+      setProfilePitches([]);
+      setProfileTotalPitchCount(0);
+      setProfileSeasonPitches({});
+      setProfileSeasonPitchCounts({});
+      setProfileLoadedSeasonCount(0);
+      setProfileLoadingSeasonCount(0);
+      return;
+    }
+
+    await loadPitcherProfileForPitcher(pitcher);
+  }
+
+  function openProfileInExplorer() {
+    const pitcher = completeProfilePitcher();
+    if (!pitcher) {
+      setProfileError("Choose a cached pitcher before opening Explorer.");
+      return;
+    }
+
+    clearPitchFilters();
+    setFilters({
+      ...initialFilters,
+      pitcher_id: String(pitcher.pitcher),
+      pitcher_name: formatPersonName(pitcher.player_name),
+    });
+    setActiveView("explorer");
+  }
+
+  function openProfileInCompare() {
+    const pitcher = completeProfilePitcher();
+    if (!pitcher) {
+      setProfileError("Choose a cached pitcher before opening Compare.");
+      return;
+    }
+
+    clearCompareFilters();
+    setCompareFilters({
+      ...initialCompareFilters,
+      pitcher_id: String(pitcher.pitcher),
+      pitcher_name: formatPersonName(pitcher.player_name),
+    });
+    setActiveView("compare");
+  }
+
   function renderPitchFilterField(field: FilterField) {
+    if (field.name === "pitcher_name") {
+      return (
+        <label className="filter-field" key={field.name}>
+          <span>{field.label}</span>
+          <PitcherCombobox
+            formatDate={formatShortDate}
+            formatPersonName={formatPersonName}
+            id="explorer-pitcher-search"
+            onBlur={() => {
+              setFilters((currentFilters) => completePitcherName(currentFilters));
+            }}
+            onChange={(value) => updateFilter("pitcher_name", value)}
+            onSelect={selectExplorerPitcher}
+            pitchers={pitchers}
+            value={filters.pitcher_name ?? ""}
+          />
+        </label>
+      );
+    }
+
     return (
       <label className="filter-field" key={field.name}>
         <span>{field.label}</span>
@@ -2582,11 +2954,6 @@ function App() {
                 : "1"
             }
             value={filters[field.name]}
-            onBlur={() => {
-              if (field.name === "pitcher_name") {
-                setFilters((currentFilters) => completePitcherName(currentFilters));
-              }
-            }}
             onChange={(event) => updateFilter(field.name, event.target.value)}
           />
         )}
@@ -3230,7 +3597,7 @@ function App() {
           <button
             aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
             className="icon-action-button theme-toggle"
-            onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+            onClick={toggleTheme}
             title={theme === "dark" ? "Light mode" : "Dark mode"}
             type="button"
           >
@@ -3250,6 +3617,15 @@ function App() {
           type="button"
         >
           Home
+        </button>
+        <button
+          className={activeView === "profile" ? "view-tab is-active" : "view-tab"}
+          onClick={() => {
+            setActiveView("profile");
+          }}
+          type="button"
+        >
+          Profile
         </button>
         <button
           className={activeView === "explorer" ? "view-tab is-active" : "view-tab"}
@@ -3399,11 +3775,6 @@ function App() {
           </section>
         ) : null}
       </section>
-      <datalist id="cached-pitchers">
-        {pitchers.map((pitcher) => (
-          <option key={pitcher.pitcher} value={formatPersonName(pitcher.player_name)} />
-        ))}
-      </datalist>
       <datalist id="pitch-descriptions">
         {pitchOptions.descriptions.map((description) => (
           <option key={description} value={description} label={formatDescription(description)} />
@@ -3414,6 +3785,41 @@ function App() {
           <option key={event} value={event} label={formatEvent(event)} />
         ))}
       </datalist>
+
+      <PitcherProfileView
+        hidden={activeView !== "profile"}
+        context={{
+          pitcherError,
+          pitchers,
+          profilePitcherName,
+          profileSeason,
+          profilePitchType,
+          setProfilePitchType,
+          profileSeasonOptions,
+          updateProfileSeason,
+          selectProfilePitcher,
+          updateProfilePitcher,
+          completeProfilePitcher,
+          resolveAndLoadProfilePitcher,
+          selectedProfilePitcher,
+          resolvableProfilePitcher,
+          isProfileLoading,
+          profileLoadedSeasonCount,
+          profileLoadingSeasonCount,
+          profileError,
+          profilePitches,
+          profileTotalPitchCount,
+          formatDate,
+          formatShortDate,
+          formatPersonName,
+          formatNumber,
+          formatRate,
+          formatBreak,
+          averageNumbers,
+          openProfileInExplorer,
+          openProfileInCompare,
+        }}
+      />
 
       <PitchExplorerView
         hidden={activeView !== "explorer"}
@@ -3470,11 +3876,14 @@ function App() {
           API_URL,
           handleCompare,
           pitcherError,
+          pitchers,
           compareDateRange,
           formatDate,
+          formatPersonName,
           compareFilters,
           completePitcherName,
           updateCompareFilter,
+          selectComparePitcher,
           compareOptions,
           hasComparePresetRange,
           setComparePreset,

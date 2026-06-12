@@ -10,6 +10,7 @@ The core idea is query-first baseball analysis: ask for a pitcher, pitch type, c
 - Queries cached data through a FastAPI backend using DuckDB.
 - Provides a React + TypeScript frontend with:
   - Ask Relay natural-language query entry
+  - Pitcher Profile cached range, arsenal, and game-trend view
   - Pitch Explorer filters, tables, heatmaps, strike-zone views, and movement charts
   - Pitcher comparison workflow with period presets, movement diff, heatmaps, and pitch-type deltas
 - Keeps natural language deterministic for now by translating text into safe structured skill calls. Relay does not generate raw SQL.

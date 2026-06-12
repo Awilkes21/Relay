@@ -138,6 +138,37 @@ class PitchesApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
 
+    def test_get_profile_pitches_requires_pitcher_and_season_and_disables_limit(self):
+        row = {
+            "game_date": "2024-04-01",
+            "player_name": "Example Pitcher",
+            "pitcher": 605400,
+            "pitch_type": "FF",
+            "release_speed": 97.5,
+        }
+
+        with patch(
+            "app.api.pitches.search_pitches",
+            return_value={"total_count": 1, "results": [row]},
+        ) as search:
+            response = TestClient(app).get(
+                "/pitches/profile",
+                params={"pitcher_id": 605400, "season": 2024},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["count"], 1)
+        search.assert_called_once()
+        self.assertEqual(search.call_args.args[0]["limit"], None)
+        self.assertEqual(search.call_args.args[0]["result_order"], "oldest")
+
+    def test_get_profile_pitches_requires_scoped_profile_filters(self):
+        missing_pitcher = TestClient(app).get("/pitches/profile", params={"season": 2024})
+        missing_season = TestClient(app).get("/pitches/profile", params={"pitcher_id": 605400})
+
+        self.assertEqual(missing_pitcher.status_code, 422)
+        self.assertEqual(missing_season.status_code, 422)
+
     def test_get_pitch_heatmap_uses_same_filters(self):
         heatmap = {
             "mode": "whiffs",
