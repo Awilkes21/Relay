@@ -150,12 +150,16 @@ function DataView({
           </div>
           <div className="data-command-list">
             <div>
-              <span>Build or extend cache</span>
-              <code>python scripts/ingest_statcast.py --help</code>
+              <span>Install portfolio demo cache</span>
+              <code>python scripts/prepare_demo_cache.py --skip-build --install</code>
             </div>
             <div>
-              <span>Refresh manifest only</span>
-              <code>python scripts/build_statcast_manifest.py --help</code>
+              <span>Build or extend cache</span>
+              <code>python scripts/ingest_statcast_batch.py --help</code>
+            </div>
+            <div>
+              <span>Build demo from local cache</span>
+              <code>python scripts/prepare_demo_cache.py --install</code>
             </div>
           </div>
           <p className="data-helper-copy">

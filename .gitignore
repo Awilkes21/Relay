@@ -250,3 +250,7 @@ data/processed/
 data/*.parquet
 data/*.db
 data/*manifest*.json
+!data/demo/
+!data/demo/README.md
+!data/demo/*.parquet
+!data/demo/*manifest*.json

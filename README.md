@@ -72,7 +72,25 @@ The Vite dev server usually runs at `http://localhost:5173`.
 
 The frontend reads `VITE_API_URL`; if unset, it defaults to `http://localhost:8000`.
 
-### 3. Ingest Sample Data
+### 3. Use Demo Data
+
+For a portfolio/demo setup, install the curated demo cache:
+
+```powershell
+cd backend
+python scripts\prepare_demo_cache.py --skip-build --install
+```
+
+If `data/demo/statcast.parquet` does not exist yet, build it from your local cache and install it:
+
+```powershell
+cd backend
+python scripts\prepare_demo_cache.py --install
+```
+
+The app reads the active cache from `data/statcast.parquet`.
+
+### 4. Ingest Sample Data
 
 Relay needs a local Statcast cache before pitch searches or comparisons are useful.
 

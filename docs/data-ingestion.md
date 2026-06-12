@@ -18,6 +18,38 @@ data/statcast_manifest.json
 
 The Parquet file is the actual pitch-level data cache. The manifest is metadata about that cache: row counts, pitchers, seasons, pitch types, game types, date ranges, and data-quality reporting.
 
+## Portfolio Demo Cache
+
+Relay can use a committed curated demo cache so the app opens with useful data immediately.
+
+Build the demo artifacts from an existing local cache:
+
+```powershell
+cd backend
+python scripts\prepare_demo_cache.py
+```
+
+Install the demo artifacts as the active app cache:
+
+```powershell
+cd backend
+python scripts\prepare_demo_cache.py --skip-build --install
+```
+
+Build and install in one step:
+
+```powershell
+cd backend
+python scripts\prepare_demo_cache.py --install
+```
+
+Demo artifacts live in:
+
+```txt
+data/demo/statcast.parquet
+data/demo/statcast_manifest.json
+```
+
 ## Single-Pitcher Ingestion
 
 Use this when testing one pitcher and date range:

@@ -1,0 +1,331 @@
+{
+  "cache": {
+    "data_quality": {
+      "metrics": [
+        {
+          "available_count": 147007,
+          "available_rate": 0.9921308200549358,
+          "denominator": "all_pitches",
+          "denominator_count": 148173,
+          "fields": [
+            "arm_angle"
+          ],
+          "key": "arm_angle",
+          "label": "Arm Angle",
+          "missing_count": 1166,
+          "missing_fields": [],
+          "missing_rate": 0.007869179945064215
+        },
+        {
+          "available_count": 147916,
+          "available_rate": 0.9982655409555047,
+          "denominator": "all_pitches",
+          "denominator_count": 148173,
+          "fields": [
+            "release_spin_rate"
+          ],
+          "key": "spin",
+          "label": "Spin",
+          "missing_count": 257,
+          "missing_fields": [],
+          "missing_rate": 0.001734459044495286
+        },
+        {
+          "available_count": 148173,
+          "available_rate": 1.0,
+          "denominator": "all_pitches",
+          "denominator_count": 148173,
+          "fields": [
+            "pfx_x",
+            "pfx_z"
+          ],
+          "key": "movement",
+          "label": "Movement",
+          "missing_count": 0,
+          "missing_fields": [],
+          "missing_rate": 0.0
+        },
+        {
+          "available_count": 148173,
+          "available_rate": 1.0,
+          "denominator": "all_pitches",
+          "denominator_count": 148173,
+          "fields": [
+            "plate_x",
+            "plate_z"
+          ],
+          "key": "plate_location",
+          "label": "Plate Location",
+          "missing_count": 0,
+          "missing_fields": [],
+          "missing_rate": 0.0
+        },
+        {
+          "available_count": 24381,
+          "available_rate": 0.9969740339398896,
+          "denominator": "balls_in_play",
+          "denominator_count": 24455,
+          "fields": [
+            "launch_speed",
+            "launch_angle"
+          ],
+          "key": "batted_ball",
+          "label": "Batted-Ball Metrics",
+          "missing_count": 74,
+          "missing_fields": [],
+          "missing_rate": 0.003025966060110407
+        }
+      ],
+      "pitch_count": 148173
+    },
+    "exists": true,
+    "first_game_date": "2021-04-01",
+    "game_types": [
+      "R"
+    ],
+    "last_game_date": "2026-06-11",
+    "pitch_types": [
+      "CH",
+      "CU",
+      "FA",
+      "FC",
+      "FF",
+      "FS",
+      "KC",
+      "KN",
+      "PO",
+      "SI",
+      "SL",
+      "ST"
+    ],
+    "pitcher_count": 12,
+    "pitchers": [
+      {
+        "first_game_date": "2022-04-29",
+        "last_game_date": "2026-06-11",
+        "pitcher_id": 680694,
+        "player_name": "Bradish, Kyle",
+        "row_count": 7088
+      },
+      {
+        "first_game_date": "2021-04-03",
+        "last_game_date": "2025-06-01",
+        "pitcher_id": 669203,
+        "player_name": "Burnes, Corbin",
+        "row_count": 12952
+      },
+      {
+        "first_game_date": "2021-04-04",
+        "last_game_date": "2026-06-09",
+        "pitcher_id": 656302,
+        "player_name": "Cease, Dylan",
+        "row_count": 16744
+      },
+      {
+        "first_game_date": "2021-04-01",
+        "last_game_date": "2026-06-09",
+        "pitcher_id": 543037,
+        "player_name": "Cole, Gerrit",
+        "row_count": 11375
+      },
+      {
+        "first_game_date": "2021-04-01",
+        "last_game_date": "2026-06-07",
+        "pitcher_id": 592332,
+        "player_name": "Gausman, Kevin",
+        "row_count": 16047
+      },
+      {
+        "first_game_date": "2022-05-08",
+        "last_game_date": "2026-06-10",
+        "pitcher_id": 669923,
+        "player_name": "Kirby, George",
+        "row_count": 11269
+      },
+      {
+        "first_game_date": "2021-04-01",
+        "last_game_date": "2026-06-07",
+        "pitcher_id": 605400,
+        "player_name": "Nola, Aaron",
+        "row_count": 15018
+      },
+      {
+        "first_game_date": "2024-05-11",
+        "last_game_date": "2026-06-09",
+        "pitcher_id": 694973,
+        "player_name": "Skenes, Paul",
+        "row_count": 6370
+      },
+      {
+        "first_game_date": "2021-04-04",
+        "last_game_date": "2026-04-29",
+        "pitcher_id": 669373,
+        "player_name": "Skubal, Tarik",
+        "row_count": 11992
+      },
+      {
+        "first_game_date": "2021-10-01",
+        "last_game_date": "2026-06-06",
+        "pitcher_id": 675911,
+        "player_name": "Strider, Spencer",
+        "row_count": 8326
+      },
+      {
+        "first_game_date": "2021-04-03",
+        "last_game_date": "2026-06-08",
+        "pitcher_id": 657277,
+        "player_name": "Webb, Logan",
+        "row_count": 15896
+      },
+      {
+        "first_game_date": "2021-04-03",
+        "last_game_date": "2026-06-09",
+        "pitcher_id": 554430,
+        "player_name": "Wheeler, Zack",
+        "row_count": 15096
+      }
+    ],
+    "row_count": 148173,
+    "seasons": [
+      2021,
+      2022,
+      2023,
+      2024,
+      2025,
+      2026
+    ]
+  },
+  "date_range": {
+    "end": "2026-06-11",
+    "start": "2021-04-01"
+  },
+  "demo": {
+    "max_pitches_per_pitcher_season": null,
+    "pitcher_ids": [
+      669373,
+      694973,
+      605400,
+      669203,
+      554430,
+      543037,
+      657277,
+      592332,
+      675911,
+      656302,
+      680694,
+      669923
+    ],
+    "seasons": [
+      2021,
+      2022,
+      2023,
+      2024,
+      2025,
+      2026
+    ],
+    "source_path": "data\\statcast.parquet"
+  },
+  "game_types": "source_subset",
+  "generated_at": "2026-06-12T21:58:50.285551+00:00",
+  "ingestion_results": [
+    {
+      "first_game_date": "2022-04-29",
+      "last_game_date": "2026-06-11",
+      "pitcher_id": 680694,
+      "player_name": "Bradish, Kyle",
+      "row_count": 7088,
+      "status": "ok"
+    },
+    {
+      "first_game_date": "2021-04-03",
+      "last_game_date": "2025-06-01",
+      "pitcher_id": 669203,
+      "player_name": "Burnes, Corbin",
+      "row_count": 12952,
+      "status": "ok"
+    },
+    {
+      "first_game_date": "2021-04-04",
+      "last_game_date": "2026-06-09",
+      "pitcher_id": 656302,
+      "player_name": "Cease, Dylan",
+      "row_count": 16744,
+      "status": "ok"
+    },
+    {
+      "first_game_date": "2021-04-01",
+      "last_game_date": "2026-06-09",
+      "pitcher_id": 543037,
+      "player_name": "Cole, Gerrit",
+      "row_count": 11375,
+      "status": "ok"
+    },
+    {
+      "first_game_date": "2021-04-01",
+      "last_game_date": "2026-06-07",
+      "pitcher_id": 592332,
+      "player_name": "Gausman, Kevin",
+      "row_count": 16047,
+      "status": "ok"
+    },
+    {
+      "first_game_date": "2022-05-08",
+      "last_game_date": "2026-06-10",
+      "pitcher_id": 669923,
+      "player_name": "Kirby, George",
+      "row_count": 11269,
+      "status": "ok"
+    },
+    {
+      "first_game_date": "2021-04-01",
+      "last_game_date": "2026-06-07",
+      "pitcher_id": 605400,
+      "player_name": "Nola, Aaron",
+      "row_count": 15018,
+      "status": "ok"
+    },
+    {
+      "first_game_date": "2024-05-11",
+      "last_game_date": "2026-06-09",
+      "pitcher_id": 694973,
+      "player_name": "Skenes, Paul",
+      "row_count": 6370,
+      "status": "ok"
+    },
+    {
+      "first_game_date": "2021-04-04",
+      "last_game_date": "2026-04-29",
+      "pitcher_id": 669373,
+      "player_name": "Skubal, Tarik",
+      "row_count": 11992,
+      "status": "ok"
+    },
+    {
+      "first_game_date": "2021-10-01",
+      "last_game_date": "2026-06-06",
+      "pitcher_id": 675911,
+      "player_name": "Strider, Spencer",
+      "row_count": 8326,
+      "status": "ok"
+    },
+    {
+      "first_game_date": "2021-04-03",
+      "last_game_date": "2026-06-08",
+      "pitcher_id": 657277,
+      "player_name": "Webb, Logan",
+      "row_count": 15896,
+      "status": "ok"
+    },
+    {
+      "first_game_date": "2021-04-03",
+      "last_game_date": "2026-06-09",
+      "pitcher_id": 554430,
+      "player_name": "Wheeler, Zack",
+      "row_count": 15096,
+      "status": "ok"
+    }
+  ],
+  "manifest_path": "data\\demo\\statcast_manifest.json",
+  "output_path": "data\\demo\\statcast.parquet",
+  "replace": true
+}
