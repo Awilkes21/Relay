@@ -1,7 +1,10 @@
 import os
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.compare import router as compare_router
 from app.api.nl_query import router as nl_query_router
@@ -28,7 +31,21 @@ app.include_router(pitches_router)
 app.include_router(compare_router)
 app.include_router(nl_query_router)
 
+FRONTEND_DIST_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+FRONTEND_INDEX = FRONTEND_DIST_DIR / "index.html"
+FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
+
+if FRONTEND_ASSETS_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_ASSETS_DIR), name="assets")
+
 
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+if FRONTEND_INDEX.exists():
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def serve_frontend(path: str) -> FileResponse:
+        return FileResponse(FRONTEND_INDEX)

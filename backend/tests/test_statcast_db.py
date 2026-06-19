@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 try:
@@ -14,6 +15,7 @@ except ModuleNotFoundError as exc:
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
 
+from app.db import statcast as statcast_db
 from app.db.statcast import data_quality_report, get_statcast_cache_metadata, statcast_connection
 
 
@@ -130,6 +132,53 @@ class StatcastDbTests(unittest.TestCase):
         self.assertEqual(metadata["source"], "duckdb")
         self.assertEqual(metadata["pitch_count"], 1)
         self.assertEqual(metadata["pitcher_count"], 1)
+
+    def test_default_cache_falls_back_to_demo_cache(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            active_parquet_path = Path(temp_dir) / "statcast.parquet"
+            active_manifest_path = Path(temp_dir) / "statcast_manifest.json"
+            demo_dir = Path(temp_dir) / "demo"
+            demo_dir.mkdir()
+            demo_parquet_path = demo_dir / "statcast.parquet"
+            demo_manifest_path = demo_dir / "statcast_manifest.json"
+            duckdb.connect().execute(
+                "COPY ("
+                "SELECT 'FF' AS pitch_type, 1 AS pitch_id, 605400 AS pitcher, "
+                "DATE '2024-04-01' AS game_date, 2024 AS game_year"
+                f") TO '{demo_parquet_path.as_posix()}' (FORMAT PARQUET)"
+            )
+            demo_manifest_path.write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-01-01T00:00:00+00:00",
+                        "output_path": str(demo_parquet_path),
+                        "date_range": {"start": "2024-04-01", "end": "2024-04-01"},
+                        "cache": {
+                            "exists": True,
+                            "row_count": 1,
+                            "pitcher_count": 1,
+                            "first_game_date": "2024-04-01",
+                            "last_game_date": "2024-04-01",
+                            "seasons": [2024],
+                            "pitch_types": ["FF"],
+                            "data_quality": {"pitch_count": 1, "metrics": []},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(statcast_db, "DEFAULT_STATCAST_PARQUET", active_parquet_path),
+                patch.object(statcast_db, "DEFAULT_STATCAST_MANIFEST", active_manifest_path),
+                patch.object(statcast_db, "DEMO_STATCAST_PARQUET", demo_parquet_path),
+                patch.object(statcast_db, "DEMO_STATCAST_MANIFEST", demo_manifest_path),
+            ):
+                metadata = get_statcast_cache_metadata(active_parquet_path)
+
+        self.assertEqual(metadata["path"], str(demo_parquet_path))
+        self.assertEqual(metadata["source"], "manifest")
+        self.assertEqual(metadata["pitch_count"], 1)
 
 
 if __name__ == "__main__":

@@ -142,9 +142,25 @@ python scripts\ingest_statcast_batch.py `
   --index-only
 ```
 
+## Production Demo
+
+Relay can be deployed as a single Docker web service for a portfolio demo. The production image builds the frontend, serves it from FastAPI, and uses the committed `data/demo` cache when no local active cache exists.
+
+Local production check:
+
+```powershell
+docker build -t relay-demo .
+docker run --rm -p 8000:8000 relay-demo
+```
+
+Then open `http://localhost:8000`.
+
+See [docs/deployment.md](docs/deployment.md) for deployment notes.
+
 ## Documentation
 
 - [docs/development.md](docs/development.md): local setup, commands, and environment variables
+- [docs/deployment.md](docs/deployment.md): production demo Docker deployment
 - [docs/data-ingestion.md](docs/data-ingestion.md): Statcast cache, manifest, game types, and ingestion scripts
 - [docs/api.md](docs/api.md): backend endpoint overview and example requests
 - [docs/natural-language.md](docs/natural-language.md): Ask Relay skill-call contract and supported phrasing

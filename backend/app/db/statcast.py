@@ -10,6 +10,8 @@ from typing import Any, Iterator
 DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 DEFAULT_STATCAST_PARQUET = DATA_DIR / "statcast.parquet"
 DEFAULT_STATCAST_MANIFEST = DATA_DIR / "statcast_manifest.json"
+DEMO_STATCAST_PARQUET = DATA_DIR / "demo" / "statcast.parquet"
+DEMO_STATCAST_MANIFEST = DATA_DIR / "demo" / "statcast_manifest.json"
 LEGACY_STATCAST_PARQUET = DATA_DIR / "statcast_sample.parquet"
 STATCAST_VIEW_NAME = "statcast_pitches"
 RAW_STATCAST_VIEW_NAME = "_raw_statcast_pitches"
@@ -80,7 +82,10 @@ def import_duckdb() -> Any:
 def resolve_statcast_parquet(parquet_path: Path | str = DEFAULT_STATCAST_PARQUET) -> Path:
     resolved_path = Path(parquet_path)
     if resolved_path == DEFAULT_STATCAST_PARQUET and not resolved_path.exists():
-        resolved_path = LEGACY_STATCAST_PARQUET
+        if DEMO_STATCAST_PARQUET.exists():
+            resolved_path = DEMO_STATCAST_PARQUET
+        else:
+            resolved_path = LEGACY_STATCAST_PARQUET
 
     if not resolved_path.exists():
         raise FileNotFoundError(f"Statcast parquet file not found: {resolved_path}")
@@ -187,10 +192,16 @@ def parquet_signature(parquet_path: Path | str = DEFAULT_STATCAST_PARQUET) -> tu
 
 def resolve_statcast_manifest(
     manifest_path: Path | str | None = None,
+    parquet_path: Path | str | None = None,
 ) -> Path:
-    if manifest_path is None:
-        return DEFAULT_STATCAST_MANIFEST
-    return Path(manifest_path)
+    if manifest_path is not None:
+        return Path(manifest_path)
+
+    resolved_parquet = Path(parquet_path) if parquet_path is not None else DEFAULT_STATCAST_PARQUET
+    if resolved_parquet == DEMO_STATCAST_PARQUET and DEMO_STATCAST_MANIFEST.exists():
+        return DEMO_STATCAST_MANIFEST
+
+    return DEFAULT_STATCAST_MANIFEST
 
 
 def cache_metadata_signature(
@@ -199,7 +210,7 @@ def cache_metadata_signature(
 ) -> tuple[str, int, int, str, int, int]:
     resolved_parquet = resolve_statcast_parquet(parquet_path)
     parquet_stat = resolved_parquet.stat()
-    resolved_manifest = resolve_statcast_manifest(manifest_path)
+    resolved_manifest = resolve_statcast_manifest(manifest_path, resolved_parquet)
     if resolved_manifest.exists():
         manifest_stat = resolved_manifest.stat()
         manifest_modified_ns = manifest_stat.st_mtime_ns
