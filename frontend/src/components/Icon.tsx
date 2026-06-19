@@ -1,6 +1,7 @@
 type IconName =
   | "chevronDown"
   | "chevronRight"
+  | "database"
   | "maximize"
   | "minimize"
   | "moon"
@@ -16,6 +17,13 @@ function Icon({ name }: IconProps) {
   const paths: Record<IconName, ReactNode> = {
     chevronDown: <polyline points="6 9 12 15 18 9" />,
     chevronRight: <polyline points="9 6 15 12 9 18" />,
+    database: (
+      <>
+        <ellipse cx="12" cy="5" rx="7" ry="3" />
+        <path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5" />
+        <path d="M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
+      </>
+    ),
     maximize: (
       <>
         <polyline points="15 3 21 3 21 9" />

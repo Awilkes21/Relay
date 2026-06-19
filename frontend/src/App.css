@@ -63,6 +63,7 @@ body,
 .metric-card,
 .comparison-panel,
 .status-pill,
+.demo-data-button,
 .view-tabs,
 .view-tab,
 .data-freshness,
@@ -189,6 +190,48 @@ button:disabled {
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.demo-data-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 38px;
+  border: 1px solid var(--relay-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--relay-surface) 88%, var(--relay-surface-soft));
+  color: var(--relay-muted);
+  box-shadow: var(--relay-shadow-flat);
+  padding: 7px 11px;
+}
+
+.demo-data-button:hover,
+.demo-data-button.is-active {
+  border-color: color-mix(in srgb, var(--relay-primary) 52%, var(--relay-border));
+  background: var(--relay-primary-soft);
+  color: var(--relay-primary);
+}
+
+.demo-data-button span {
+  display: grid;
+  gap: 1px;
+  text-align: left;
+}
+
+.demo-data-button strong {
+  color: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.demo-data-button small {
+  color: var(--relay-muted);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.1;
+  white-space: nowrap;
 }
 
 .theme-toggle {
@@ -1407,6 +1450,10 @@ button:disabled {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
   gap: 18px;
+}
+
+.data-layout--single {
+  grid-template-columns: 1fr;
 }
 
 .data-cache-panel {
@@ -4138,6 +4185,11 @@ tbody tr:last-child td {
   .status-pill {
     width: 100%;
     white-space: normal;
+  }
+
+  .demo-data-button {
+    flex: 1 1 180px;
+    justify-content: flex-start;
   }
 
   .header-actions {

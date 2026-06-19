@@ -77,6 +77,7 @@ function DataView({
   const seasons = cacheMetadata?.seasons ?? [];
   const pitchTypes = cacheMetadata?.pitch_types ?? [];
   const qualityMetrics = cacheMetadata?.data_quality.metrics ?? [];
+  const showLocalCommands = import.meta.env.DEV;
   const manifestGeneratedAt = cacheMetadata?.manifest?.generated_at
     ? new Date(cacheMetadata.manifest.generated_at).toLocaleString()
     : "-";
@@ -85,11 +86,11 @@ function DataView({
     <section className="page-section data-view" hidden={hidden} aria-labelledby="data-view-title">
       <div className="section-heading">
         <div>
-          <h2 id="data-view-title">Data</h2>
-          <p>Understand what Relay can answer from your local Statcast cache.</p>
+          <h2 id="data-view-title">Demo Data</h2>
+          <p>Review the curated Statcast coverage powering this Relay demo.</p>
         </div>
         <button className="secondary-button" disabled={isRefreshing} onClick={onRefresh} type="button">
-          {isRefreshing ? "Refreshing..." : "Refresh Cache Status"}
+          {isRefreshing ? "Refreshing..." : "Refresh Coverage"}
         </button>
       </div>
 
@@ -114,12 +115,12 @@ function DataView({
         </div>
       </section>
 
-      <section className="data-layout">
+      <section className={showLocalCommands ? "data-layout" : "data-layout data-layout--single"}>
         <section className="chart-panel data-cache-panel">
           <div className="chart-heading">
             <div>
               <h3>Cache Coverage</h3>
-              <p>{cacheMetadata?.path ?? "No cache metadata loaded."}</p>
+              <p>Cached seasons and pitch types currently available to Relay.</p>
             </div>
           </div>
           <div className="data-chip-list" aria-label="Cached seasons">
@@ -141,31 +142,33 @@ function DataView({
           </div>
         </section>
 
-        <section className="chart-panel data-cache-panel">
-          <div className="chart-heading">
-            <div>
-              <h3>Update Local Data</h3>
-              <p>Normal app requests read the existing cache; ingestion still runs from the terminal.</p>
+        {showLocalCommands ? (
+          <section className="chart-panel data-cache-panel">
+            <div className="chart-heading">
+              <div>
+                <h3>Update Local Data</h3>
+                <p>Normal app requests read the existing cache; ingestion still runs from the terminal.</p>
+              </div>
             </div>
-          </div>
-          <div className="data-command-list">
-            <div>
-              <span>Install portfolio demo cache</span>
-              <code>python scripts/prepare_demo_cache.py --skip-build --install</code>
+            <div className="data-command-list">
+              <div>
+                <span>Install portfolio demo cache</span>
+                <code>python scripts/prepare_demo_cache.py --skip-build --install</code>
+              </div>
+              <div>
+                <span>Build or extend cache</span>
+                <code>python scripts/ingest_statcast_batch.py --help</code>
+              </div>
+              <div>
+                <span>Build demo from local cache</span>
+                <code>python scripts/prepare_demo_cache.py --install</code>
+              </div>
             </div>
-            <div>
-              <span>Build or extend cache</span>
-              <code>python scripts/ingest_statcast_batch.py --help</code>
-            </div>
-            <div>
-              <span>Build demo from local cache</span>
-              <code>python scripts/prepare_demo_cache.py --install</code>
-            </div>
-          </div>
-          <p className="data-helper-copy">
-            After ingestion completes, use Refresh Cache Status so Relay reloads pitchers, seasons, and quality metrics.
-          </p>
-        </section>
+            <p className="data-helper-copy">
+              After ingestion completes, use Refresh Coverage so Relay reloads pitchers, seasons, and quality metrics.
+            </p>
+          </section>
+        ) : null}
       </section>
 
       <section className="chart-panel data-quality-panel">

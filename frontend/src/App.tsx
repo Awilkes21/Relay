@@ -1696,6 +1696,18 @@ function App() {
     return `${countLabel(pitchers.length, "pitcher")} | ${countLabel(totalPitches, "pitch")} | ${firstDate} to ${lastDate}`;
   }
 
+  function demoDataSummary() {
+    const pitcherCount = cacheMetadata?.pitcher_count ?? pitchers.length;
+    if (pitcherCount === 0) return null;
+    const seasons = cacheMetadata?.seasons ?? [];
+    const seasonRange = seasons.length
+      ? `${seasons[0]}${seasons.length > 1 ? `-${seasons.at(-1)}` : ""}`
+      : null;
+    return seasonRange
+      ? `${countLabel(pitcherCount, "pitcher")} | ${seasonRange}`
+      : countLabel(pitcherCount, "pitcher");
+  }
+
   function hasComparePresetRange(preset: ComparePreset, pitcher = compareDateRangePitcher()) {
     if (!pitcher) return false;
     const first = dateFromIso(pitcher.first_game_date);
@@ -3266,6 +3278,10 @@ function App() {
     [comparison],
   );
   const freshness = useMemo(() => datasetFreshness(), [pitchers]);
+  const dataSummary = useMemo(
+    () => demoDataSummary(),
+    [cacheMetadata?.pitcher_count, cacheMetadata?.seasons, pitchers],
+  );
   const compareDateRange = useMemo(
     () => compareDateRangePitcher(),
     [compareFilters.pitcher_id, compareFilters.pitcher_name, pitchers],
@@ -3766,6 +3782,18 @@ function App() {
         </div>
         <div className="header-actions">
           <button
+            className={activeView === "data" ? "demo-data-button is-active" : "demo-data-button"}
+            onClick={() => setActiveView("data")}
+            title={freshness ? `Open demo data coverage: ${freshness}` : "Open demo data coverage"}
+            type="button"
+          >
+            <Icon name="database" />
+            <span>
+              <strong>Demo Data</strong>
+              <small>{dataSummary ?? "Coverage"}</small>
+            </span>
+          </button>
+          <button
             aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
             className="icon-action-button theme-toggle"
             onClick={toggleTheme}
@@ -3788,15 +3816,6 @@ function App() {
           type="button"
         >
           Home
-        </button>
-        <button
-          className={activeView === "data" ? "view-tab is-active" : "view-tab"}
-          onClick={() => {
-            setActiveView("data");
-          }}
-          type="button"
-        >
-          Data
         </button>
         <button
           className={activeView === "profile" ? "view-tab is-active" : "view-tab"}
@@ -3826,7 +3845,6 @@ function App() {
           Compare
         </button>
       </nav>
-      {freshness ? <div className="data-freshness">Cache: {freshness}</div> : null}
       <section className="home-section" hidden={activeView !== "home"} aria-labelledby="home-title">
         <div className="home-copy">
           <h2 id="home-title">Ask Relay</h2>
