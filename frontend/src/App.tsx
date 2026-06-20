@@ -2848,35 +2848,34 @@ function App() {
     setProfileError(null);
 
     try {
-      const seasonResponses = await Promise.all(
-        seasonOptions.map(async (season) => {
-          const response = await getProfilePitches({
-            pitcher_id: String(pitcher.pitcher),
-            pitcher_name: "",
-            season,
-            result_order: "oldest",
-          });
-          if (profileLoadRequestId.current === requestId) {
-            setProfileLoadedSeasonCount((count) => count + 1);
-          }
-          return { season, response };
-        }),
-      );
+      const activeResponse = await getProfilePitches({
+        pitcher_id: String(pitcher.pitcher),
+        pitcher_name: "",
+        season: activeSeason,
+        result_order: "oldest",
+      });
       if (profileLoadRequestId.current !== requestId) return;
 
-      const nextPitches = Object.fromEntries(
-        seasonResponses.map(({ season, response }) => [season, response.results]),
-      );
-      const nextCounts = Object.fromEntries(
-        seasonResponses.map(({ season, response }) => [season, response.total_count]),
-      );
-
-      setProfileSeasonPitches(nextPitches);
-      setProfileSeasonPitchCounts(nextCounts);
-      setProfilePitches(nextPitches[activeSeason] ?? []);
-      setProfileTotalPitchCount(nextCounts[activeSeason] ?? 0);
+      setProfileSeasonPitches({ [activeSeason]: activeResponse.results });
+      setProfileSeasonPitchCounts({ [activeSeason]: activeResponse.total_count });
+      setProfilePitches(activeResponse.results);
+      setProfileTotalPitchCount(activeResponse.total_count);
       setProfileSeason(activeSeason);
-      setProfileLoadedSeasonCount(seasonOptions.length);
+      setProfileLoadedSeasonCount(1);
+
+      for (const season of seasonOptions.filter((season) => season !== activeSeason)) {
+        const response = await getProfilePitches({
+          pitcher_id: String(pitcher.pitcher),
+          pitcher_name: "",
+          season,
+          result_order: "oldest",
+        });
+        if (profileLoadRequestId.current !== requestId) return;
+
+        setProfileSeasonPitches((current) => ({ ...current, [season]: response.results }));
+        setProfileSeasonPitchCounts((current) => ({ ...current, [season]: response.total_count }));
+        setProfileLoadedSeasonCount((count) => count + 1);
+      }
     } catch (error) {
       if (profileLoadRequestId.current !== requestId) return;
       setProfilePitches([]);
