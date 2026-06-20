@@ -161,10 +161,44 @@ class PitchesApiTests(unittest.TestCase):
         search.assert_called_once()
         self.assertEqual(search.call_args.args[0]["limit"], None)
         self.assertEqual(search.call_args.args[0]["result_order"], "oldest")
+        self.assertIn("select_fields", search.call_args.kwargs)
 
     def test_get_profile_pitches_requires_scoped_profile_filters(self):
         missing_pitcher = TestClient(app).get("/pitches/profile", params={"season": 2024})
         missing_season = TestClient(app).get("/pitches/profile", params={"pitcher_id": 605400})
+
+        self.assertEqual(missing_pitcher.status_code, 422)
+        self.assertEqual(missing_season.status_code, 422)
+
+    def test_get_profile_summary_requires_pitcher_and_season(self):
+        summary = {
+            "pitch_count": 100,
+            "metrics": {
+                "average_velocity": 95.1,
+                "average_spin": 2400,
+                "strike_rate": 0.65,
+                "whiff_rate": 0.28,
+                "zone_rate": 0.52,
+            },
+            "arsenal": [],
+            "bucketed": {"game": [], "month": []},
+        }
+
+        with patch("app.api.pitches.get_pitcher_profile_summary", return_value=summary) as get_summary:
+            response = TestClient(app).get(
+                "/pitches/profile/summary",
+                params={"pitcher_id": 605400, "season": 2024},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), summary)
+        get_summary.assert_called_once()
+        self.assertEqual(get_summary.call_args.args[0]["pitcher_id"], 605400)
+        self.assertEqual(get_summary.call_args.args[0]["season"], 2024)
+
+    def test_get_profile_summary_requires_scoped_profile_filters(self):
+        missing_pitcher = TestClient(app).get("/pitches/profile/summary", params={"season": 2024})
+        missing_season = TestClient(app).get("/pitches/profile/summary", params={"pitcher_id": 605400})
 
         self.assertEqual(missing_pitcher.status_code, 422)
         self.assertEqual(missing_season.status_code, 422)

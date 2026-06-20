@@ -152,6 +152,57 @@ export type PitchSearchResponse = {
   results: PitchResult[];
 };
 
+export type ProfileSummaryMetrics = {
+  average_velocity: number | null;
+  average_spin: number | null;
+  strike_rate: number | null;
+  whiff_rate: number | null;
+  zone_rate: number | null;
+};
+
+export type ProfileArsenalPitch = {
+  pitch_type: string;
+  count: number;
+  velocity: number | null;
+  spin: number | null;
+  ivb: number | null;
+  hb: number | null;
+  strikes: number;
+  whiffs: number;
+  located_count: number;
+  zone_count: number;
+};
+
+export type ProfileBucketRow = {
+  bucket: string;
+  pitch_type: string;
+  count: number;
+  velocity: number | null;
+  spin: number | null;
+  ivb: number | null;
+  hb: number | null;
+  arm_angle: number | null;
+  strikes: number;
+  whiffs: number;
+  located_count: number;
+  zone_count: number;
+  balls_in_play: number;
+  contacted_count: number;
+  hard_contact_count: number;
+  average_exit_velocity: number | null;
+  max_exit_velocity: number | null;
+};
+
+export type ProfileSummaryResponse = {
+  pitch_count: number;
+  metrics: ProfileSummaryMetrics;
+  arsenal: ProfileArsenalPitch[];
+  bucketed: {
+    game: ProfileBucketRow[];
+    month: ProfileBucketRow[];
+  };
+};
+
 export type HeatmapMode = "all" | "whiffs" | "hard_contact" | "in_zone";
 
 export type PitchHeatmapCell = {
@@ -390,6 +441,28 @@ export async function getProfilePitches(filters: PitchFilters): Promise<PitchSea
 
   if (!response.ok) {
     throw new Error(await responseError(response, `Profile pitches returned ${response.status}`));
+  }
+
+  return response.json();
+}
+
+export async function getProfileSummary(filters: PitchFilters): Promise<ProfileSummaryResponse> {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    const trimmedValue = Array.isArray(value) ? value.filter(Boolean).join(",") : value?.trim();
+    if (trimmedValue && key !== "single_game" && key !== "count" && key !== "limit") {
+      params.set(key, trimmedValue);
+    }
+  });
+
+  const queryString = params.toString();
+  const response = await fetch(
+    `${API_URL}/pitches/profile/summary${queryString ? `?${queryString}` : ""}`,
+  );
+
+  if (!response.ok) {
+    throw new Error(await responseError(response, `Profile summary returned ${response.status}`));
   }
 
   return response.json();

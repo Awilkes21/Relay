@@ -20,9 +20,10 @@ import {
   getHealth,
   getPitchFilterOptions,
   getPitchers,
-  getProfilePitches,
+  getProfileSummary,
   parseNaturalLanguageQuery,
   searchPitches,
+  type ProfileSummaryResponse,
 } from "./api";
 import PitchExplorerView from "./views/PitchExplorerView";
 import CompareView from "./views/CompareView";
@@ -896,10 +897,9 @@ function App() {
   const [profilePitcherName, setProfilePitcherName] = useState(initialRoute.profilePitcherName);
   const [profileSeason, setProfileSeason] = useState(initialRoute.profileSeason);
   const [profilePitchType, setProfilePitchType] = useState(initialRoute.profilePitchType);
-  const [profilePitches, setProfilePitches] = useState<PitchResult[]>([]);
   const [profileTotalPitchCount, setProfileTotalPitchCount] = useState(0);
-  const [profileSeasonPitches, setProfileSeasonPitches] = useState<Record<string, PitchResult[]>>({});
-  const [profileSeasonPitchCounts, setProfileSeasonPitchCounts] = useState<Record<string, number>>({});
+  const [profileSummary, setProfileSummary] = useState<ProfileSummaryResponse | null>(null);
+  const [profileSeasonSummaries, setProfileSeasonSummaries] = useState<Record<string, ProfileSummaryResponse>>({});
   const [profileLoadedSeasonCount, setProfileLoadedSeasonCount] = useState(0);
   const [profileLoadingSeasonCount, setProfileLoadingSeasonCount] = useState(0);
   const [isProfileLoading, setIsProfileLoading] = useState(false);
@@ -1056,10 +1056,9 @@ function App() {
         setProfilePitcherName(route.profilePitcherName);
         setProfileSeason(route.profileSeason);
         setProfilePitchType(route.profilePitchType);
-        setProfilePitches([]);
         setProfileTotalPitchCount(0);
-        setProfileSeasonPitches({});
-        setProfileSeasonPitchCounts({});
+        setProfileSummary(null);
+        setProfileSeasonSummaries({});
         setProfileLoadedSeasonCount(0);
         setProfileLoadingSeasonCount(0);
         setProfileError(null);
@@ -2747,10 +2746,9 @@ function App() {
     setProfilePitcherId("");
     setProfileSeason("");
     setProfilePitchType("");
-    setProfilePitches([]);
     setProfileTotalPitchCount(0);
-    setProfileSeasonPitches({});
-    setProfileSeasonPitchCounts({});
+    setProfileSummary(null);
+    setProfileSeasonSummaries({});
     setProfileLoadedSeasonCount(0);
     setProfileLoadingSeasonCount(0);
     setProfileError(null);
@@ -2762,10 +2760,9 @@ function App() {
     setProfilePitcherName(formatPersonName(pitcher.player_name));
     setProfileSeason(season);
     setProfilePitchType("");
-    setProfilePitches([]);
     setProfileTotalPitchCount(0);
-    setProfileSeasonPitches({});
-    setProfileSeasonPitchCounts({});
+    setProfileSummary(null);
+    setProfileSeasonSummaries({});
     setProfileLoadedSeasonCount(0);
     setProfileLoadingSeasonCount(0);
     setProfileError(null);
@@ -2790,7 +2787,7 @@ function App() {
 
     const pitcherId = String(pitcher.pitcher);
     const hasCachedProfile =
-      profilePitcherId === pitcherId && Object.keys(profileSeasonPitches).length > 0;
+      profilePitcherId === pitcherId && Object.keys(profileSeasonSummaries).length > 0;
 
     if (!hasCachedProfile) {
       void loadPitcherProfileForPitcher(pitcher);
@@ -2798,20 +2795,20 @@ function App() {
   }
 
   async function updateProfileSeason(season: string) {
-    const nextSeasonPitches = profileSeasonPitches[season] ?? [];
+    const nextSummary = profileSeasonSummaries[season] ?? null;
     const shouldKeepPitchType =
       Boolean(profilePitchType) &&
-      nextSeasonPitches.some((pitch) => (pitch.pitch_type ?? "Unknown") === profilePitchType);
+      Boolean(nextSummary?.arsenal.some((pitch) => pitch.pitch_type === profilePitchType));
 
     setProfileSeason(season);
     if (!shouldKeepPitchType) {
       setProfilePitchType("");
     }
-    setProfilePitches(nextSeasonPitches);
-    setProfileTotalPitchCount(profileSeasonPitchCounts[season] ?? 0);
+    setProfileSummary(nextSummary);
+    setProfileTotalPitchCount(nextSummary?.pitch_count ?? 0);
     setProfileError(null);
 
-    if (profileSeasonPitches[season]) return;
+    if (nextSummary) return;
 
     const pitcher = resolvableProfilePitcher();
     if (!pitcher) return;
@@ -2823,18 +2820,16 @@ function App() {
     setProfileLoadedSeasonCount(0);
 
     try {
-      const response = await getProfilePitches({
+      const response = await getProfileSummary({
         pitcher_id: String(pitcher.pitcher),
         pitcher_name: "",
         season,
-        result_order: "oldest",
       });
       if (profileLoadRequestId.current !== requestId) return;
 
-      setProfileSeasonPitches((current) => ({ ...current, [season]: response.results }));
-      setProfileSeasonPitchCounts((current) => ({ ...current, [season]: response.total_count }));
-      setProfilePitches(response.results);
-      setProfileTotalPitchCount(response.total_count);
+      setProfileSeasonSummaries((current) => ({ ...current, [season]: response }));
+      setProfileSummary(response);
+      setProfileTotalPitchCount(response.pitch_count);
       setProfileLoadedSeasonCount(1);
     } catch (error) {
       if (profileLoadRequestId.current !== requestId) return;
@@ -2858,10 +2853,9 @@ function App() {
 
     if (!activeSeason) {
       setProfileError("Choose a season before loading a profile.");
-      setProfilePitches([]);
       setProfileTotalPitchCount(0);
-      setProfileSeasonPitches({});
-      setProfileSeasonPitchCounts({});
+      setProfileSummary(null);
+      setProfileSeasonSummaries({});
       setProfileLoadedSeasonCount(0);
       setProfileLoadingSeasonCount(0);
       return;
@@ -2873,37 +2867,33 @@ function App() {
     setProfilePitcherId(String(pitcher.pitcher));
     setProfilePitcherName(formatPersonName(pitcher.player_name));
     setProfileSeason(activeSeason);
-    setProfilePitches([]);
     setProfileTotalPitchCount(0);
-    setProfileSeasonPitches({});
-    setProfileSeasonPitchCounts({});
+    setProfileSummary(null);
+    setProfileSeasonSummaries({});
     setProfileLoadedSeasonCount(0);
     setProfileLoadingSeasonCount(1);
     setIsProfileLoading(true);
     setProfileError(null);
 
     try {
-      const activeResponse = await getProfilePitches({
+      const activeResponse = await getProfileSummary({
         pitcher_id: String(pitcher.pitcher),
         pitcher_name: "",
         season: activeSeason,
-        result_order: "oldest",
       });
       if (profileLoadRequestId.current !== requestId) return;
 
-      setProfileSeasonPitches({ [activeSeason]: activeResponse.results });
-      setProfileSeasonPitchCounts({ [activeSeason]: activeResponse.total_count });
-      setProfilePitches(activeResponse.results);
-      setProfileTotalPitchCount(activeResponse.total_count);
+      setProfileSeasonSummaries({ [activeSeason]: activeResponse });
+      setProfileSummary(activeResponse);
+      setProfileTotalPitchCount(activeResponse.pitch_count);
       setProfileSeason(activeSeason);
       setProfileLoadedSeasonCount(1);
 
     } catch (error) {
       if (profileLoadRequestId.current !== requestId) return;
-      setProfilePitches([]);
       setProfileTotalPitchCount(0);
-      setProfileSeasonPitches({});
-      setProfileSeasonPitchCounts({});
+      setProfileSummary(null);
+      setProfileSeasonSummaries({});
       setProfileLoadedSeasonCount(0);
       setProfileLoadingSeasonCount(0);
       setProfileError(error instanceof Error ? error.message : "Profile failed to load");
@@ -2919,10 +2909,9 @@ function App() {
     const pitcher = completeProfilePitcher();
     if (!pitcher) {
       setProfileError("Choose a cached pitcher before loading a profile.");
-      setProfilePitches([]);
       setProfileTotalPitchCount(0);
-      setProfileSeasonPitches({});
-      setProfileSeasonPitchCounts({});
+      setProfileSummary(null);
+      setProfileSeasonSummaries({});
       setProfileLoadedSeasonCount(0);
       setProfileLoadingSeasonCount(0);
       return;
@@ -3026,10 +3015,9 @@ function App() {
     setProfilePitcherName(formatPersonName(match.player_name));
     setProfileSeason(activeSeason);
     setProfilePitchType(pitchType);
-    setProfilePitches([]);
     setProfileTotalPitchCount(0);
-    setProfileSeasonPitches({});
-    setProfileSeasonPitchCounts({});
+    setProfileSummary(null);
+    setProfileSeasonSummaries({});
     setProfileLoadedSeasonCount(0);
     setProfileLoadingSeasonCount(0);
     setProfileError(null);
@@ -4040,7 +4028,7 @@ function App() {
           profileLoadedSeasonCount,
           profileLoadingSeasonCount,
           profileError,
-          profilePitches,
+          profileSummary,
           profileTotalPitchCount,
           formatDate,
           formatShortDate,

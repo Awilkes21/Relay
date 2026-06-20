@@ -25,6 +25,17 @@ HEATMAP_Z_MIN = 0.0
 HEATMAP_Z_MAX = 5.0
 HARD_CONTACT_MIN_LAUNCH_SPEED = 95
 WHIFF_DESCRIPTIONS = ("swinging_strike", "swinging_strike_blocked", "missed_bunt")
+STRIKE_DESCRIPTIONS = (
+    "called_strike",
+    "foul",
+    "foul_bunt",
+    "foul_tip",
+    "hit_into_play",
+    "hit_into_play_no_out",
+    "hit_into_play_score",
+    "swinging_strike",
+    "swinging_strike_blocked",
+)
 PITCH_TYPE_GROUPS = {
     "fastball": ("FF", "SI", "FC"),
     "breaking": ("SL", "ST", "CU", "KC", "SV"),
@@ -304,6 +315,10 @@ def _rows_to_dicts(columns: list[str], rows: list[tuple[Any, ...]]) -> list[dict
     ]
 
 
+def _sql_in_values(values: tuple[str, ...]) -> str:
+    return "(" + ", ".join(_duckdb_string_literal(value) for value in values) + ")"
+
+
 def _duckdb_string_literal(value: str) -> str:
     return duckdb_string_literal(value)
 
@@ -401,6 +416,105 @@ def get_pitch_data_quality(
         )
 
     return {"pitch_count": pitch_count, "metrics": metrics}
+
+
+def get_pitcher_profile_summary(
+    filters: dict[str, Any],
+    parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
+) -> dict[str, Any]:
+    where_sql, params = _build_where_clause(filters)
+    strike_values = _sql_in_values(STRIKE_DESCRIPTIONS)
+    whiff_values = _sql_in_values(WHIFF_DESCRIPTIONS)
+    zone_condition = _zone_condition()
+    batted_ball_condition = "description IN ('hit_into_play', 'hit_into_play_no_out', 'hit_into_play_score')"
+
+    season_query = (
+        "SELECT "
+        "count(*) AS pitch_count, "
+        "avg(release_speed) AS average_velocity, "
+        "avg(release_spin_rate) AS average_spin, "
+        f"sum(CASE WHEN description IN {strike_values} THEN 1 ELSE 0 END) AS strike_count, "
+        f"sum(CASE WHEN description IN {whiff_values} THEN 1 ELSE 0 END) AS whiff_count, "
+        "sum(CASE WHEN plate_x IS NOT NULL AND plate_z IS NOT NULL THEN 1 ELSE 0 END) AS located_count, "
+        f"sum(CASE WHEN {zone_condition} THEN 1 ELSE 0 END) AS zone_count "
+        f"FROM statcast_pitches{where_sql}"
+    )
+    arsenal_query = (
+        "SELECT "
+        "COALESCE(pitch_type, 'Unknown') AS pitch_type, "
+        "count(*) AS count, "
+        "avg(release_speed) AS velocity, "
+        "avg(release_spin_rate) AS spin, "
+        "avg(pfx_z * 12) AS ivb, "
+        "avg(pfx_x * -12) AS hb, "
+        f"sum(CASE WHEN description IN {strike_values} THEN 1 ELSE 0 END) AS strikes, "
+        f"sum(CASE WHEN description IN {whiff_values} THEN 1 ELSE 0 END) AS whiffs, "
+        "sum(CASE WHEN plate_x IS NOT NULL AND plate_z IS NOT NULL THEN 1 ELSE 0 END) AS located_count, "
+        f"sum(CASE WHEN {zone_condition} THEN 1 ELSE 0 END) AS zone_count "
+        f"FROM statcast_pitches{where_sql} "
+        "GROUP BY COALESCE(pitch_type, 'Unknown') "
+        "ORDER BY count DESC"
+    )
+    bucket_query_template = (
+        "SELECT "
+        "{bucket_expression} AS bucket, "
+        "COALESCE(pitch_type, 'Unknown') AS pitch_type, "
+        "count(*) AS count, "
+        "avg(release_speed) AS velocity, "
+        "avg(release_spin_rate) AS spin, "
+        "avg(pfx_z * 12) AS ivb, "
+        "avg(pfx_x * -12) AS hb, "
+        "avg(arm_angle) AS arm_angle, "
+        f"sum(CASE WHEN description IN {strike_values} THEN 1 ELSE 0 END) AS strikes, "
+        f"sum(CASE WHEN description IN {whiff_values} THEN 1 ELSE 0 END) AS whiffs, "
+        "sum(CASE WHEN plate_x IS NOT NULL AND plate_z IS NOT NULL THEN 1 ELSE 0 END) AS located_count, "
+        f"sum(CASE WHEN {zone_condition} THEN 1 ELSE 0 END) AS zone_count, "
+        f"sum(CASE WHEN {batted_ball_condition} THEN 1 ELSE 0 END) AS balls_in_play, "
+        "sum(CASE WHEN launch_speed IS NOT NULL THEN 1 ELSE 0 END) AS contacted_count, "
+        "sum(CASE WHEN launch_speed >= 95 THEN 1 ELSE 0 END) AS hard_contact_count, "
+        "avg(launch_speed) AS average_exit_velocity, "
+        "max(launch_speed) AS max_exit_velocity "
+        f"FROM statcast_pitches{where_sql} "
+        "GROUP BY bucket, COALESCE(pitch_type, 'Unknown') "
+        "ORDER BY bucket ASC, count DESC"
+    )
+
+    with statcast_connection(parquet_path) as connection:
+        season_cursor = connection.execute(season_query, params)
+        season_columns = [description[0] for description in season_cursor.description]
+        season_row = _rows_to_dicts(season_columns, season_cursor.fetchall())[0]
+
+        arsenal_cursor = connection.execute(arsenal_query, params)
+        arsenal_columns = [description[0] for description in arsenal_cursor.description]
+        arsenal = _rows_to_dicts(arsenal_columns, arsenal_cursor.fetchall())
+
+        bucketed: dict[str, list[dict[str, Any]]] = {}
+        for mode, bucket_expression in {
+            "game": "CAST(game_date AS VARCHAR)",
+            "month": "strftime('%Y-%m', CAST(game_date AS DATE))",
+        }.items():
+            cursor = connection.execute(
+                bucket_query_template.format(bucket_expression=bucket_expression),
+                params,
+            )
+            columns = [description[0] for description in cursor.description]
+            bucketed[mode] = _rows_to_dicts(columns, cursor.fetchall())
+
+    pitch_count = int(season_row["pitch_count"] or 0)
+    located_count = int(season_row["located_count"] or 0)
+
+    return {
+        "pitch_count": pitch_count,
+        "metrics": {
+            "average_velocity": season_row["average_velocity"],
+            "average_spin": season_row["average_spin"],
+            "strike_rate": (int(season_row["strike_count"] or 0) / pitch_count) if pitch_count else None,
+            "whiff_rate": (int(season_row["whiff_count"] or 0) / pitch_count) if pitch_count else None,
+            "zone_rate": (int(season_row["zone_count"] or 0) / located_count) if located_count else None,
+        },
+        "arsenal": arsenal,
+        "bucketed": bucketed,
+    }
 
 
 def get_pitch_heatmap(

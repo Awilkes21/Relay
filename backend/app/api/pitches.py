@@ -7,6 +7,7 @@ from app.services.pitch_query_service import (
     get_cache_metadata,
     get_pitch_data_quality,
     get_pitch_heatmap,
+    get_pitcher_profile_summary,
     list_cached_pitchers,
     list_pitch_filter_options,
     search_pitches,
@@ -226,6 +227,20 @@ def get_profile_pitches(
         "movement": MOVEMENT_METADATA,
         "results": results,
     }
+
+
+@router.get("/pitches/profile/summary")
+def get_profile_summary(filters: PitchFilterParams = Depends()) -> dict[str, Any]:
+    pitch_filters = filters.to_filters()
+    if not pitch_filters["season"]:
+        raise HTTPException(status_code=422, detail="season is required for profile summary")
+    if not pitch_filters["pitcher_id"] and not pitch_filters["pitcher_name"]:
+        raise HTTPException(status_code=422, detail="pitcher_id or pitcher_name is required for profile summary")
+
+    try:
+        return get_pitcher_profile_summary(pitch_filters)
+    except Exception as exc:
+        raise_service_error(exc)
 
 
 @router.get("/pitches/data-quality")

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CachedPitcher, PitchResult } from "../api";
+import type { CachedPitcher, ProfileBucketRow, ProfileSummaryResponse } from "../api";
 import Icon from "../components/Icon";
 import PitcherCombobox from "../components/PitcherCombobox";
 import {
@@ -8,7 +8,6 @@ import {
   formatBucketLabel,
   trendMetrics,
   type TimeBucketMode,
-  type TimeSeriesDomain,
   type TrendMetric,
 } from "../components/ProfileTrendCharts";
 import { formatPitchTypeWithCode } from "../pitchTypes";
@@ -19,7 +18,7 @@ type PitcherProfileViewContext = Record<string, any> & {
   profilePitcherName: string;
   profileSeason: string;
   profilePitchType: string;
-  profilePitches: PitchResult[];
+  profileSummary: ProfileSummaryResponse | null;
   profileTotalPitchCount: number;
 };
 
@@ -32,194 +31,106 @@ const timeSeriesColors = ["#174f78", "#0f766e", "#9a5b13", "#7c3aed", "#b33a31",
 const minTrendPitchCount = 5;
 const minTrendPitchShare = 0.005;
 
-const strikeDescriptions = new Set([
-  "called_strike",
-  "foul",
-  "foul_bunt",
-  "foul_tip",
-  "hit_into_play",
-  "hit_into_play_no_out",
-  "hit_into_play_score",
-  "swinging_strike",
-  "swinging_strike_blocked",
-]);
-
-const whiffDescriptions = new Set(["swinging_strike", "swinging_strike_blocked"]);
-
-function average(values: number[]) {
-  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
-}
-
-function bucketKeyForPitch(pitch: PitchResult, mode: TimeBucketMode) {
-  if (!pitch.game_date) return "";
-  return mode === "month" ? pitch.game_date.slice(0, 7) : pitch.game_date;
-}
-
-function pitchTypeOf(pitch: PitchResult) {
-  return pitch.pitch_type ?? "Unknown";
-}
-
-function rateFromPitches(pitches: PitchResult[], predicate: (pitch: PitchResult) => boolean) {
-  return pitches.length ? pitches.filter(predicate).length / pitches.length : null;
-}
-
-function zoneRate(pitches: PitchResult[]) {
-  const located = pitches.filter((pitch) => pitch.plate_x !== null && pitch.plate_z !== null);
-  if (!located.length) return null;
-
-  return located.filter(
-    (pitch) =>
-      pitch.plate_x !== null &&
-      pitch.plate_z !== null &&
-      Math.abs(pitch.plate_x) <= 0.83 &&
-      pitch.plate_z >= 1.5 &&
-      pitch.plate_z <= 3.5,
-  ).length / located.length;
-}
-
-function pitchSummary(pitches: PitchResult[]) {
-  const byPitch = pitches.reduce((groups, pitch) => {
-    const pitchType = pitch.pitch_type ?? "Unknown";
-    const current = groups.get(pitchType) ?? {
-      pitchType,
-      count: 0,
-      velocity: [] as number[],
-      spin: [] as number[],
-      ivb: [] as number[],
-      hb: [] as number[],
-      whiffs: 0,
-      strikes: 0,
-    };
-    current.count += 1;
-    if (pitch.release_speed !== null) current.velocity.push(pitch.release_speed);
-    if (pitch.release_spin_rate !== null) current.spin.push(pitch.release_spin_rate);
-    if (pitch.pfx_z !== null) current.ivb.push(pitch.pfx_z * 12);
-    if (pitch.pfx_x !== null) current.hb.push(pitch.pfx_x * -12);
-    if (pitch.description && whiffDescriptions.has(pitch.description)) current.whiffs += 1;
-    if (pitch.description && strikeDescriptions.has(pitch.description)) current.strikes += 1;
-    groups.set(pitchType, current);
-    return groups;
-  }, new Map<string, {
-    pitchType: string;
-    count: number;
-    velocity: number[];
-    spin: number[];
-    ivb: number[];
-    hb: number[];
-    whiffs: number;
-    strikes: number;
-  }>());
-
-  return Array.from(byPitch.values()).sort((a, b) => b.count - a.count);
-}
-
-function filterTrendPitchSummaries(summaries: ReturnType<typeof pitchSummary>, totalPitchCount: number) {
+function filterTrendPitchSummaries<T extends { count: number }>(summaries: T[], totalPitchCount: number) {
   const minimumCount = Math.max(minTrendPitchCount, Math.ceil(totalPitchCount * minTrendPitchShare));
   const filtered = summaries.filter((pitch) => pitch.count >= minimumCount);
 
   return filtered.length ? filtered : summaries;
 }
 
-function buildTrendData(pitches: PitchResult[]) {
-  const byDate = pitches.reduce((groups, pitch) => {
-    if (!pitch.game_date) return groups;
-    const current = groups.get(pitch.game_date) ?? {
-      velocity: [] as number[],
-      spin: [] as number[],
-      ivb: [] as number[],
-      hb: [] as number[],
-      count: 0,
-    };
-    current.count += 1;
-    if (pitch.release_speed !== null) current.velocity.push(pitch.release_speed);
-    if (pitch.release_spin_rate !== null) current.spin.push(pitch.release_spin_rate);
-    if (pitch.pfx_z !== null) current.ivb.push(pitch.pfx_z * 12);
-    if (pitch.pfx_x !== null) current.hb.push(pitch.pfx_x * -12);
-    groups.set(pitch.game_date, current);
-    return groups;
-  }, new Map<string, { count: number; velocity: number[]; spin: number[]; ivb: number[]; hb: number[] }>());
+function profileSummaryPitchRows(summary: ProfileSummaryResponse | null) {
+  return (summary?.arsenal ?? []).map((pitch) => ({
+    pitchType: pitch.pitch_type,
+    count: pitch.count,
+    velocity: pitch.velocity === null ? [] : [pitch.velocity],
+    spin: pitch.spin === null ? [] : [pitch.spin],
+    ivb: pitch.ivb === null ? [] : [pitch.ivb],
+    hb: pitch.hb === null ? [] : [pitch.hb],
+    whiffs: pitch.whiffs,
+    strikes: pitch.strikes,
+    locatedCount: pitch.located_count,
+    zoneCount: pitch.zone_count,
+  }));
+}
 
-  return Array.from(byDate.entries())
-    .map(([date, values]) => ({
-      date,
-      count: values.count,
-      velocity: average(values.velocity),
-      spin: average(values.spin),
-      ivb: average(values.ivb),
-      hb: average(values.hb),
+function rate(numerator: number, denominator: number) {
+  return denominator ? numerator / denominator : null;
+}
+
+function rowsForMode(summary: ProfileSummaryResponse | null, mode: TimeBucketMode) {
+  return summary?.bucketed[mode] ?? [];
+}
+
+function sortedBucketKeysFromRows(rows: ProfileBucketRow[]) {
+  return Array.from(new Set(rows.map((row) => row.bucket).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+}
+
+function buildTrendDataFromRows(rows: ProfileBucketRow[], selectedPitchType: string) {
+  return rows
+    .filter((row) => row.pitch_type === selectedPitchType)
+    .map((row) => ({
+      date: row.bucket,
+      count: row.count,
+      velocity: row.velocity,
+      spin: row.spin,
+      ivb: row.ivb,
+      hb: row.hb,
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-function sortedBucketKeys(pitches: PitchResult[], mode: TimeBucketMode) {
-  return Array.from(
-    new Set(
-      pitches
-        .map((pitch) => bucketKeyForPitch(pitch, mode))
-        .filter(Boolean),
-    ),
-  ).sort((a, b) => a.localeCompare(b));
-}
-
-function buildPitchTypeBucketSeries({
-  pitches,
+function buildPitchTypeBucketSeriesFromRows({
+  rows,
   pitchTypes,
   buckets,
-  mode,
   metric,
 }: {
-  pitches: PitchResult[];
+  rows: ProfileBucketRow[];
   pitchTypes: string[];
   buckets: string[];
-  mode: TimeBucketMode;
   metric: "usage" | "velocity";
 }) {
-  return pitchTypes.map((pitchType, seriesIndex) => {
-    const points = buckets.map((bucket) => {
-      const bucketPitches = pitches.filter((pitch) => bucketKeyForPitch(pitch, mode) === bucket);
-      const pitchTypePitches = bucketPitches.filter((pitch) => pitchTypeOf(pitch) === pitchType);
+  const bucketTotals = new Map<string, number>();
+  rows.forEach((row) => {
+    bucketTotals.set(row.bucket, (bucketTotals.get(row.bucket) ?? 0) + row.count);
+  });
+
+  return pitchTypes.map((pitchType, seriesIndex) => ({
+    key: pitchType,
+    label: formatPitchTypeWithCode(pitchType),
+    color: timeSeriesColors[seriesIndex % timeSeriesColors.length],
+    points: buckets.map((bucket) => {
+      const row = rows.find((candidate) => candidate.bucket === bucket && candidate.pitch_type === pitchType);
       if (metric === "usage") {
+        const total = bucketTotals.get(bucket) ?? 0;
         return {
           bucket,
-          count: pitchTypePitches.length,
-          value: bucketPitches.length ? pitchTypePitches.length / bucketPitches.length : null,
+          count: row?.count ?? 0,
+          value: row && total ? row.count / total : null,
         };
       }
 
       return {
         bucket,
-        count: pitchTypePitches.length,
-        value: average(
-          pitchTypePitches
-            .map((pitch) => pitch.release_speed)
-            .filter((value): value is number => value !== null),
-        ),
+        count: row?.count ?? 0,
+        value: row?.velocity ?? null,
       };
-    });
-
-    return {
-      key: pitchType,
-      label: formatPitchTypeWithCode(pitchType),
-      color: timeSeriesColors[seriesIndex % timeSeriesColors.length],
-      points,
-    };
-  });
+    }),
+  }));
 }
 
-function buildSelectedPitchBucketSeries({
-  pitches,
+function buildSelectedPitchBucketSeriesFromRows({
+  rows,
   buckets,
-  mode,
   selectedPitchType,
   metric,
 }: {
-  pitches: PitchResult[];
+  rows: ProfileBucketRow[];
   buckets: string[];
-  mode: TimeBucketMode;
   selectedPitchType: string;
   metric: "movement" | "arm" | "outcomes";
 }) {
-  const selectedPitches = pitches.filter((pitch) => pitchTypeOf(pitch) === selectedPitchType);
+  const selectedRows = rows.filter((row) => row.pitch_type === selectedPitchType);
 
   if (metric === "movement") {
     return [
@@ -228,16 +139,8 @@ function buildSelectedPitchBucketSeries({
         label: "IVB",
         color: timeSeriesColors[0],
         points: buckets.map((bucket) => {
-          const bucketPitches = selectedPitches.filter((pitch) => bucketKeyForPitch(pitch, mode) === bucket);
-          return {
-            bucket,
-            count: bucketPitches.length,
-            value: average(
-              bucketPitches
-                .map((pitch) => (pitch.pfx_z === null ? null : pitch.pfx_z * 12))
-                .filter((value): value is number => value !== null),
-            ),
-          };
+          const row = selectedRows.find((candidate) => candidate.bucket === bucket);
+          return { bucket, count: row?.count ?? 0, value: row?.ivb ?? null };
         }),
       },
       {
@@ -245,16 +148,8 @@ function buildSelectedPitchBucketSeries({
         label: "HB",
         color: timeSeriesColors[1],
         points: buckets.map((bucket) => {
-          const bucketPitches = selectedPitches.filter((pitch) => bucketKeyForPitch(pitch, mode) === bucket);
-          return {
-            bucket,
-            count: bucketPitches.length,
-            value: average(
-              bucketPitches
-                .map((pitch) => (pitch.pfx_x === null ? null : pitch.pfx_x * -12))
-                .filter((value): value is number => value !== null),
-            ),
-          };
+          const row = selectedRows.find((candidate) => candidate.bucket === bucket);
+          return { bucket, count: row?.count ?? 0, value: row?.hb ?? null };
         }),
       },
     ];
@@ -267,16 +162,8 @@ function buildSelectedPitchBucketSeries({
         label: "Arm Angle",
         color: timeSeriesColors[3],
         points: buckets.map((bucket) => {
-          const bucketPitches = selectedPitches.filter((pitch) => bucketKeyForPitch(pitch, mode) === bucket);
-          return {
-            bucket,
-            count: bucketPitches.length,
-            value: average(
-              bucketPitches
-                .map((pitch) => pitch.arm_angle)
-                .filter((value): value is number => value !== null),
-            ),
-          };
+          const row = selectedRows.find((candidate) => candidate.bucket === bucket);
+          return { bucket, count: row?.count ?? 0, value: row?.arm_angle ?? null };
         }),
       },
     ];
@@ -288,12 +175,8 @@ function buildSelectedPitchBucketSeries({
       label: "Whiff",
       color: timeSeriesColors[0],
       points: buckets.map((bucket) => {
-        const bucketPitches = selectedPitches.filter((pitch) => bucketKeyForPitch(pitch, mode) === bucket);
-        return {
-          bucket,
-          count: bucketPitches.length,
-          value: rateFromPitches(bucketPitches, (pitch) => Boolean(pitch.description && whiffDescriptions.has(pitch.description))),
-        };
+        const row = selectedRows.find((candidate) => candidate.bucket === bucket);
+        return { bucket, count: row?.count ?? 0, value: row ? rate(row.whiffs, row.count) : null };
       }),
     },
     {
@@ -301,12 +184,8 @@ function buildSelectedPitchBucketSeries({
       label: "Zone",
       color: timeSeriesColors[1],
       points: buckets.map((bucket) => {
-        const bucketPitches = selectedPitches.filter((pitch) => bucketKeyForPitch(pitch, mode) === bucket);
-        return {
-          bucket,
-          count: bucketPitches.length,
-          value: zoneRate(bucketPitches),
-        };
+        const row = selectedRows.find((candidate) => candidate.bucket === bucket);
+        return { bucket, count: row?.count ?? 0, value: row ? rate(row.zone_count, row.located_count) : null };
       }),
     },
     {
@@ -314,38 +193,17 @@ function buildSelectedPitchBucketSeries({
       label: "Hard Contact",
       color: timeSeriesColors[4],
       points: buckets.map((bucket) => {
-        const bucketPitches = selectedPitches.filter((pitch) => bucketKeyForPitch(pitch, mode) === bucket);
-        const contacted = bucketPitches.filter((pitch) => pitch.launch_speed !== null);
-        return {
-          bucket,
-          count: contacted.length,
-          value: contacted.length
-            ? contacted.filter((pitch) => pitch.launch_speed !== null && pitch.launch_speed >= 95).length / contacted.length
-            : null,
-        };
+        const row = selectedRows.find((candidate) => candidate.bucket === bucket);
+        return { bucket, count: row?.contacted_count ?? 0, value: row ? rate(row.hard_contact_count, row.contacted_count) : null };
       }),
     },
   ];
 }
 
-function buildArmAngleDomain(
-  pitches: PitchResult[],
-  pitchTypes: string[],
-  buckets: string[],
-  mode: TimeBucketMode,
-): TimeSeriesDomain | undefined {
-  const values = pitchTypes.flatMap((pitchType) =>
-    buckets
-      .map((bucket) =>
-        average(
-          pitches
-            .filter((pitch) => pitchTypeOf(pitch) === pitchType && bucketKeyForPitch(pitch, mode) === bucket)
-            .map((pitch) => pitch.arm_angle)
-            .filter((value): value is number => value !== null),
-        ),
-      )
-      .filter((value): value is number => value !== null),
-  );
+function buildArmAngleDomainFromRows(rows: ProfileBucketRow[], pitchTypes: string[]) {
+  const values = rows
+    .filter((row) => pitchTypes.includes(row.pitch_type) && row.arm_angle !== null)
+    .map((row) => row.arm_angle!);
 
   if (values.length === 0) return undefined;
 
@@ -353,40 +211,31 @@ function buildArmAngleDomain(
   const max = Math.max(...values);
   const padding = Math.max((max - min) * 0.12, 0.5);
 
-  return {
-    min: min - padding,
-    max: max + padding,
-  };
+  return { min: min - padding, max: max + padding };
 }
 
-function buildOutcomeBucketContext({
-  pitches,
+function buildOutcomeBucketContextFromRows({
+  rows,
   bucket,
   mode,
   formatShortDate,
 }: {
-  pitches: PitchResult[];
+  rows: ProfileBucketRow[];
   bucket: string;
   mode: TimeBucketMode;
   formatShortDate: (value: string) => string;
 }) {
-  const bucketPitches = pitches.filter((pitch) => bucketKeyForPitch(pitch, mode) === bucket);
-  const contacted = bucketPitches.filter((pitch) => pitch.launch_speed !== null);
-  const hardContactCount = contacted.filter((pitch) => pitch.launch_speed !== null && pitch.launch_speed >= 95).length;
-  const exitVelocities = contacted.map((pitch) => pitch.launch_speed).filter((value): value is number => value !== null);
-  const maxExitVelocity = exitVelocities.length
-    ? Math.max(...exitVelocities)
-    : null;
+  const row = rows.find((candidate) => candidate.bucket === bucket);
 
   return {
     label: bucket ? formatBucketLabel(bucket, mode, formatShortDate) : "-",
-    pitchCount: bucketPitches.length,
-    contactedCount: contacted.length,
-    hardContactRate: contacted.length ? hardContactCount / contacted.length : null,
-    averageExitVelocity: average(exitVelocities),
-    maxExitVelocity,
-    whiffRate: rateFromPitches(bucketPitches, (pitch) => Boolean(pitch.description && whiffDescriptions.has(pitch.description))),
-    zoneRate: zoneRate(bucketPitches),
+    pitchCount: row?.count ?? 0,
+    contactedCount: row?.contacted_count ?? 0,
+    hardContactRate: row ? rate(row.hard_contact_count, row.contacted_count) : null,
+    averageExitVelocity: row?.average_exit_velocity ?? null,
+    maxExitVelocity: row?.max_exit_velocity ?? null,
+    whiffRate: row ? rate(row.whiffs, row.count) : null,
+    zoneRate: row ? rate(row.zone_count, row.located_count) : null,
   };
 }
 
@@ -409,7 +258,7 @@ function PitcherProfileView({ hidden, context }: PitcherProfileViewProps) {
     profileLoadedSeasonCount,
     profileLoadingSeasonCount,
     profileError,
-    profilePitches,
+    profileSummary,
     profileTotalPitchCount,
     formatDate,
     formatShortDate,
@@ -422,104 +271,106 @@ function PitcherProfileView({ hidden, context }: PitcherProfileViewProps) {
     openProfileInCompare,
   } = context;
   const selectedPitcher = selectedProfilePitcher() ?? resolvableProfilePitcher();
-  const summaries = useMemo(() => pitchSummary(profilePitches), [profilePitches]);
+  const summaries = useMemo(
+    () => profileSummaryPitchRows(profileSummary),
+    [profileSummary],
+  );
   const trendSummaries = useMemo(
-    () => filterTrendPitchSummaries(summaries, profilePitches.length),
-    [profilePitches.length, summaries],
+    () => filterTrendPitchSummaries(summaries, profileTotalPitchCount),
+    [profileTotalPitchCount, summaries],
   );
   const availableSeasons = profileSeasonOptions();
   const activeSeason = profileSeason || availableSeasons[0] || "";
-  const isPartialSeasonLoad = profileTotalPitchCount > profilePitches.length;
+  const hasProfileData = Boolean(profileSummary && profileTotalPitchCount > 0);
   const [focusedTrendMetric, setFocusedTrendMetric] = useState<TrendMetric | null>(null);
   const [timeBucketMode, setTimeBucketMode] = useState<TimeBucketMode>("game");
   const [inspectedOutcomeBucket, setInspectedOutcomeBucket] = useState("");
   const selectedTrendSummary = trendSummaries.find((pitch) => pitch.pitchType === profilePitchType) ?? trendSummaries[0];
-  const selectedTrendPitches = useMemo(
+  const timeRows = useMemo(() => rowsForMode(profileSummary, timeBucketMode), [profileSummary, timeBucketMode]);
+  const selectedTrendRows = useMemo(
     () =>
       selectedTrendSummary
-        ? profilePitches.filter((pitch) => (pitch.pitch_type ?? "Unknown") === selectedTrendSummary.pitchType)
+        ? timeRows.filter((row) => row.pitch_type === selectedTrendSummary.pitchType)
         : [],
-    [profilePitches, selectedTrendSummary],
+    [timeRows, selectedTrendSummary],
   );
-  const trendData = useMemo(() => buildTrendData(selectedTrendPitches), [selectedTrendPitches]);
+  const trendData = useMemo(
+    () => buildTrendDataFromRows(rowsForMode(profileSummary, "game"), selectedTrendSummary?.pitchType ?? ""),
+    [profileSummary, selectedTrendSummary],
+  );
   const selectedTrendGameCount = useMemo(
-    () => new Set(selectedTrendPitches.map((pitch) => pitch.game_date).filter(Boolean)).size,
-    [selectedTrendPitches],
+    () => new Set(rowsForMode(profileSummary, "game").filter((row) => row.pitch_type === selectedTrendSummary?.pitchType).map((row) => row.bucket)).size,
+    [profileSummary, selectedTrendSummary],
   );
-  const selectedTrendUsage = selectedTrendPitches.length / profilePitches.length;
+  const selectedTrendUsage = selectedTrendSummary ? selectedTrendSummary.count / profileTotalPitchCount : null;
   const selectedTrendVelocity = selectedTrendSummary ? averageNumbers(selectedTrendSummary.velocity) : null;
   const selectedTrendSpin = selectedTrendSummary ? averageNumbers(selectedTrendSummary.spin) : null;
   const selectedTrendIvb = selectedTrendSummary ? averageNumbers(selectedTrendSummary.ivb) : null;
   const selectedTrendHb = selectedTrendSummary ? averageNumbers(selectedTrendSummary.hb) : null;
-  const selectedTrendStrikeRate = rateFromPitches(selectedTrendPitches, (pitch) => Boolean(pitch.description && strikeDescriptions.has(pitch.description)));
-  const selectedTrendWhiffRate = rateFromPitches(selectedTrendPitches, (pitch) => Boolean(pitch.description && whiffDescriptions.has(pitch.description)));
-  const selectedTrendZoneRate = zoneRate(selectedTrendPitches);
-  const timeBuckets = useMemo(() => sortedBucketKeys(profilePitches, timeBucketMode), [profilePitches, timeBucketMode]);
+  const selectedTrendStrikeRate = selectedTrendSummary ? selectedTrendSummary.strikes / selectedTrendSummary.count : null;
+  const selectedTrendWhiffRate = selectedTrendSummary ? selectedTrendSummary.whiffs / selectedTrendSummary.count : null;
+  const selectedTrendZoneRate = selectedTrendSummary ? rate(selectedTrendSummary.zoneCount, selectedTrendSummary.locatedCount) : null;
+  const timeBuckets = useMemo(() => sortedBucketKeysFromRows(timeRows), [timeRows]);
   const timePitchTypes = useMemo(() => trendSummaries.map((pitch) => pitch.pitchType), [trendSummaries]);
   const timeUsageSeries = useMemo(
     () =>
-      buildPitchTypeBucketSeries({
-        pitches: profilePitches,
+      buildPitchTypeBucketSeriesFromRows({
+        rows: timeRows,
         pitchTypes: timePitchTypes,
         buckets: timeBuckets,
-        mode: timeBucketMode,
         metric: "usage",
       }),
-    [profilePitches, timePitchTypes, timeBuckets, timeBucketMode],
+    [timeRows, timePitchTypes, timeBuckets],
   );
   const timeVelocitySeries = useMemo(
     () =>
-      buildPitchTypeBucketSeries({
-        pitches: profilePitches,
+      buildPitchTypeBucketSeriesFromRows({
+        rows: timeRows,
         pitchTypes: timePitchTypes,
         buckets: timeBuckets,
-        mode: timeBucketMode,
         metric: "velocity",
       }),
-    [profilePitches, timePitchTypes, timeBuckets, timeBucketMode],
+    [timeRows, timePitchTypes, timeBuckets],
   );
   const timeMovementSeries = useMemo(
     () =>
       selectedTrendSummary
-        ? buildSelectedPitchBucketSeries({
-            pitches: profilePitches,
+        ? buildSelectedPitchBucketSeriesFromRows({
+            rows: timeRows,
             buckets: timeBuckets,
-            mode: timeBucketMode,
             selectedPitchType: selectedTrendSummary.pitchType,
             metric: "movement",
           })
         : [],
-    [profilePitches, selectedTrendSummary, timeBuckets, timeBucketMode],
+    [timeRows, selectedTrendSummary, timeBuckets],
   );
   const timeArmSeries = useMemo(
     () =>
       selectedTrendSummary
-        ? buildSelectedPitchBucketSeries({
-            pitches: profilePitches,
+        ? buildSelectedPitchBucketSeriesFromRows({
+            rows: timeRows,
             buckets: timeBuckets,
-            mode: timeBucketMode,
             selectedPitchType: selectedTrendSummary.pitchType,
             metric: "arm",
           })
         : [],
-    [profilePitches, selectedTrendSummary, timeBuckets, timeBucketMode],
+    [timeRows, selectedTrendSummary, timeBuckets],
   );
   const timeArmDomain = useMemo(
-    () => buildArmAngleDomain(profilePitches, timePitchTypes, timeBuckets, timeBucketMode),
-    [profilePitches, timePitchTypes, timeBuckets, timeBucketMode],
+    () => buildArmAngleDomainFromRows(timeRows, timePitchTypes),
+    [timeRows, timePitchTypes],
   );
   const timeOutcomeSeries = useMemo(
     () =>
       selectedTrendSummary
-        ? buildSelectedPitchBucketSeries({
-            pitches: profilePitches,
+        ? buildSelectedPitchBucketSeriesFromRows({
+            rows: timeRows,
             buckets: timeBuckets,
-            mode: timeBucketMode,
             selectedPitchType: selectedTrendSummary.pitchType,
             metric: "outcomes",
           })
         : [],
-    [profilePitches, selectedTrendSummary, timeBuckets, timeBucketMode],
+    [timeRows, selectedTrendSummary, timeBuckets],
   );
   const activeOutcomeBucket = inspectedOutcomeBucket && timeBuckets.includes(inspectedOutcomeBucket)
     ? inspectedOutcomeBucket
@@ -527,20 +378,20 @@ function PitcherProfileView({ hidden, context }: PitcherProfileViewProps) {
   const selectedOutcomeContext = useMemo(
     () =>
       selectedTrendSummary
-        ? buildOutcomeBucketContext({
-            pitches: selectedTrendPitches,
+        ? buildOutcomeBucketContextFromRows({
+            rows: selectedTrendRows,
             bucket: activeOutcomeBucket,
             mode: timeBucketMode,
             formatShortDate,
           })
         : null,
-    [activeOutcomeBucket, formatShortDate, selectedTrendPitches, selectedTrendSummary, timeBucketMode],
+    [activeOutcomeBucket, formatShortDate, selectedTrendRows, selectedTrendSummary, timeBucketMode],
   );
-  const averageVelocity = averageNumbers(profilePitches.map((pitch) => pitch.release_speed).filter((value): value is number => value !== null));
-  const averageSpin = averageNumbers(profilePitches.map((pitch) => pitch.release_spin_rate).filter((value): value is number => value !== null));
-  const strikeRate = rateFromPitches(profilePitches, (pitch) => Boolean(pitch.description && strikeDescriptions.has(pitch.description)));
-  const whiffRate = rateFromPitches(profilePitches, (pitch) => Boolean(pitch.description && whiffDescriptions.has(pitch.description)));
-  const inZoneRate = zoneRate(profilePitches);
+  const averageVelocity = profileSummary?.metrics.average_velocity ?? null;
+  const averageSpin = profileSummary?.metrics.average_spin ?? null;
+  const strikeRate = profileSummary?.metrics.strike_rate ?? null;
+  const whiffRate = profileSummary?.metrics.whiff_rate ?? null;
+  const inZoneRate = profileSummary?.metrics.zone_rate ?? null;
   const profileCacheProgress =
     isProfileLoading && profileLoadingSeasonCount > 0
       ? `Caching seasons ${Math.min(profileLoadedSeasonCount, profileLoadingSeasonCount)} of ${profileLoadingSeasonCount}`
@@ -637,14 +488,14 @@ function PitcherProfileView({ hidden, context }: PitcherProfileViewProps) {
               </div>
               <div>
                 <span>Season Pitches</span>
-                <strong>{countLabel(profileTotalPitchCount || profilePitches.length, "pitch")}</strong>
+                <strong>{countLabel(profileTotalPitchCount, "pitch")}</strong>
               </div>
             </div>
           </div>
         </section>
       ) : null}
 
-      {profilePitches.length > 0 ? (
+      {hasProfileData ? (
         <>
           <section className="profile-metric-grid">
             <div className="metric-card">
@@ -668,12 +519,6 @@ function PitcherProfileView({ hidden, context }: PitcherProfileViewProps) {
               <strong>{formatRate(inZoneRate)}</strong>
             </div>
           </section>
-          {isPartialSeasonLoad ? (
-            <div className="inline-note">
-              Showing {countLabel(profilePitches.length, "pitch")} of {countLabel(profileTotalPitchCount, "pitch")} returned for this season.
-            </div>
-          ) : null}
-
           <section className="chart-panel">
             <div className="chart-heading">
               <h3>Arsenal</h3>
@@ -714,7 +559,7 @@ function PitcherProfileView({ hidden, context }: PitcherProfileViewProps) {
                     >
                       <td>{formatPitchTypeWithCode(pitch.pitchType)}</td>
                       <td>{pitch.count}</td>
-                      <td>{formatRate(pitch.count / profilePitches.length)}</td>
+                      <td>{formatRate(pitch.count / profileTotalPitchCount)}</td>
                       <td>{formatNumber(averageNumbers(pitch.velocity))}</td>
                       <td>{formatNumber(averageNumbers(pitch.spin), 0)}</td>
                       <td>{formatNumber(averageNumbers(pitch.ivb))}</td>
@@ -784,7 +629,7 @@ function PitcherProfileView({ hidden, context }: PitcherProfileViewProps) {
                 <h3>Pitch Trends</h3>
                 <p>
                   {selectedTrendSummary
-                    ? `${formatPitchTypeWithCode(selectedTrendSummary.pitchType)} across ${countLabel(selectedTrendPitches.length, "pitch")}`
+                    ? `${formatPitchTypeWithCode(selectedTrendSummary.pitchType)} across ${countLabel(selectedTrendSummary.count, "pitch")}`
                     : "Choose a pitch type"}
                 </p>
               </div>
@@ -809,7 +654,7 @@ function PitcherProfileView({ hidden, context }: PitcherProfileViewProps) {
               <section className="selected-pitch-summary-grid" aria-label="Selected pitch summary">
                 <div className="selected-pitch-summary-card">
                   <span>Sample</span>
-                  <strong>{countLabel(selectedTrendPitches.length, "pitch")}</strong>
+                  <strong>{countLabel(selectedTrendSummary.count, "pitch")}</strong>
                   <em>
                     {countLabel(selectedTrendGameCount, "game")} | {formatRate(selectedTrendUsage)} usage
                   </em>
