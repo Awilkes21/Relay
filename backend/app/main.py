@@ -42,7 +42,7 @@ async def add_process_time_header(request: Request, call_next):
     response.headers["X-Process-Time-ms"] = f"{elapsed_ms:.1f}"
     if request.url.path.startswith("/assets/"):
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-    elif request.url.path in {"/robots.txt", "/favicon.ico"}:
+    elif request.url.path in {"/robots.txt", "/favicon.ico", "/favicon.svg", "/relay-preview.svg"}:
         response.headers["Cache-Control"] = "public, max-age=86400"
     if request.url.path.startswith(("/pitches", "/compare", "/pitchers", "/cache", "/query")):
         LOGGER.info(
@@ -72,6 +72,22 @@ def robots_txt() -> FileResponse:
     if robots_path.exists():
         return FileResponse(robots_path, media_type="text/plain")
     return FileResponse(Path(__file__).resolve().parents[2] / "frontend" / "public" / "robots.txt", media_type="text/plain")
+
+
+@app.get("/favicon.svg", include_in_schema=False)
+def favicon_svg() -> FileResponse:
+    favicon_path = FRONTEND_DIST_DIR / "favicon.svg"
+    if favicon_path.exists():
+        return FileResponse(favicon_path, media_type="image/svg+xml")
+    return FileResponse(Path(__file__).resolve().parents[2] / "frontend" / "public" / "favicon.svg", media_type="image/svg+xml")
+
+
+@app.get("/relay-preview.svg", include_in_schema=False)
+def relay_preview_svg() -> FileResponse:
+    preview_path = FRONTEND_DIST_DIR / "relay-preview.svg"
+    if preview_path.exists():
+        return FileResponse(preview_path, media_type="image/svg+xml")
+    return FileResponse(Path(__file__).resolve().parents[2] / "frontend" / "public" / "relay-preview.svg", media_type="image/svg+xml")
 
 
 @app.get("/health", response_model=HealthResponse)

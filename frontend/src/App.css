@@ -418,13 +418,14 @@ button:disabled {
 }
 
 .query-examples {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
-  align-items: center;
+  align-items: stretch;
 }
 
 .query-examples > span {
+  grid-column: 1 / -1;
   color: var(--relay-muted);
   font-size: 12px;
   font-weight: 900;
@@ -432,19 +433,45 @@ button:disabled {
 }
 
 .query-examples button {
+  display: grid;
+  gap: 5px;
+  align-content: start;
+  min-height: 132px;
   border: 1px solid var(--relay-border);
-  border-radius: 999px;
+  border-radius: 12px;
   background: var(--relay-surface);
-  color: var(--relay-muted);
-  font-size: 13px;
-  font-weight: 700;
+  color: var(--relay-text);
   box-shadow: var(--relay-shadow-flat);
-  padding: 7px 11px;
+  padding: 12px;
+  text-align: left;
 }
 
 .query-examples button:hover {
   border-color: var(--relay-primary);
+  box-shadow: var(--relay-shadow-soft);
+  transform: translateY(-1px);
+}
+
+.query-examples button strong {
   color: var(--relay-text);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.query-examples button small {
+  color: var(--relay-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.query-examples button em {
+  align-self: end;
+  color: var(--relay-primary);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1.35;
 }
 
 .query-library {
@@ -4168,6 +4195,10 @@ tbody tr:last-child td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .query-examples {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .data-layout {
     grid-template-columns: 1fr;
   }
@@ -4283,6 +4314,14 @@ tbody tr:last-child td {
   }
 
   .suggestion-card {
+    min-height: 0;
+  }
+
+  .query-examples {
+    grid-template-columns: 1fr;
+  }
+
+  .query-examples button {
     min-height: 0;
   }
 

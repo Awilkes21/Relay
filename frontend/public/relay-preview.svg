@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#f4f8fb"/>
+  <rect x="64" y="64" width="1072" height="502" rx="32" fill="#ffffff" stroke="#c9d7e6" stroke-width="3"/>
+  <text x="112" y="170" fill="#07182d" font-family="Inter, Arial, sans-serif" font-size="76" font-weight="800">Relay</text>
+  <text x="112" y="224" fill="#41536c" font-family="Inter, Arial, sans-serif" font-size="30">Statcast pitcher analytics demo</text>
+  <g transform="translate(112 292)">
+    <rect width="976" height="182" rx="20" fill="#0d2b45"/>
+    <path d="M62 126V42h57c24 0 40 13 40 32 0 14-8 24-22 30l28 22h-38l-23-19H92v19H62Zm30-44h26c8 0 13-3 13-9 0-5-5-8-13-8H92v17Z" fill="#f8fbff"/>
+    <path d="M62 148h104" stroke="#48c4b7" stroke-width="10" stroke-linecap="round"/>
+    <g fill="none" stroke-width="5">
+      <path d="M248 132c70-98 130-98 200 0s130 98 200 0 130-98 200 0" stroke="#48c4b7"/>
+      <path d="M248 88h640" stroke="#315d7d"/>
+      <path d="M248 44h640" stroke="#315d7d"/>
+    </g>
+    <g fill="#f8fbff" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="700">
+      <text x="252" y="164">Profiles</text>
+      <text x="430" y="164">Trends</text>
+      <text x="592" y="164">Heatmaps</text>
+      <text x="790" y="164">Comparisons</text>
+    </g>
+  </g>
+</svg>

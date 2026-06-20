@@ -125,6 +125,11 @@ type StoredQuery = {
   view: "explorer" | "compare" | "profile";
   created_at: string;
 };
+type DemoQuery = {
+  label: string;
+  query: string;
+  detail: string;
+};
 type SortDirection = "asc" | "desc";
 type PitchSortKey =
   | "game_date"
@@ -949,9 +954,10 @@ function App() {
 
   useEffect(() => {
     let isMounted = true;
+    let retryTimeout: number | undefined;
 
-    getHealth()
-      .then((health) => {
+    function checkHealth(attempt = 1) {
+      getHealth().then((health) => {
         if (!isMounted) return;
         setBackendStatus(health.status === "ok" ? "connected" : "error");
         setStatusText(
@@ -960,14 +966,24 @@ function App() {
             : `Backend status: ${health.status}`,
         );
       })
-      .catch((error: Error) => {
+      .catch(() => {
         if (!isMounted) return;
+        if (attempt < 3) {
+          setBackendStatus("checking");
+          setStatusText("Waking up demo backend...");
+          retryTimeout = window.setTimeout(() => checkHealth(attempt + 1), 1800 * attempt);
+          return;
+        }
         setBackendStatus("error");
-        setStatusText(error.message);
+        setStatusText("Demo backend unavailable. Try refreshing in a moment.");
       });
+    }
+
+    checkHealth();
 
     return () => {
       isMounted = false;
+      if (retryTimeout) window.clearTimeout(retryTimeout);
     };
   }, []);
 
@@ -3565,16 +3581,27 @@ function App() {
     () => activeCompareFilters(),
     [compareFilters],
   );
-  const sampleQueries = useMemo(() => {
+  const sampleQueries = useMemo<DemoQuery[]>(() => {
     if (pitchers.length === 0) {
-      return ["Search a cached pitcher to get started"];
+      return [
+        {
+          label: "Start with a cached pitcher",
+          query: "Kevin Gausman profile",
+          detail: "Load a pitcher profile once demo data is available.",
+        },
+      ];
     }
 
     const sortedPitchers = [...pitchers].sort((a, b) => b.pitch_count - a.pitch_count);
     const pitchTypes = cacheMetadata?.pitch_types ?? [];
-    const firstPitcher = sortedPitchers[0];
-    const secondPitcher = sortedPitchers[1] ?? sortedPitchers[0];
+    const findPitcher = (name: string) =>
+      sortedPitchers.find((pitcher) => formatPersonName(pitcher.player_name).toLowerCase() === name.toLowerCase());
+    const gausman = findPitcher("Kevin Gausman") ?? sortedPitchers[0];
+    const cease = findPitcher("Dylan Cease") ?? sortedPitchers[1] ?? sortedPitchers[0];
+    const skubal = findPitcher("Tarik Skubal") ?? sortedPitchers[2] ?? sortedPitchers[0];
+    const webb = findPitcher("Logan Webb") ?? sortedPitchers[3] ?? sortedPitchers[0];
     const multiSeasonPitcher =
+      skubal ??
       sortedPitchers.find(
         (pitcher) =>
           dateFromIso(pitcher.first_game_date).getFullYear() !==
@@ -3584,10 +3611,26 @@ function App() {
       pitchPhraseFromTypes(pitchTypes, ["KC", "CU", "SL", "ST", "CH", "FF"]) ?? "four seam fastballs";
 
     return [
-      `${formatPersonName(firstPitcher.player_name)} fastballs over 97 to left handed hitters`,
-      `show ${formatPersonName(firstPitcher.player_name)} ${latestProfileSeason(firstPitcher)} profile`,
-      `${formatPersonName(secondPitcher.player_name)} breaking balls with runners on`,
-      `compare ${formatPersonName(multiSeasonPitcher.player_name)} ${comparePitchPhrase} previous season vs current season same span`,
+      {
+        label: "Pitcher Profile",
+        query: `show ${formatPersonName(gausman.player_name)} ${latestProfileSeason(gausman)} splitter profile`,
+        detail: "Open a season-specific profile with pitch trends.",
+      },
+      {
+        label: "Pitch Search",
+        query: `${formatPersonName(cease.player_name)} curveballs`,
+        detail: "Try a natural-language pitch query with smart pitch aliases.",
+      },
+      {
+        label: "Pitch Mix",
+        query: `${formatPersonName(webb.player_name)} pitch mix ${latestProfileSeason(webb)}`,
+        detail: "Jump to arsenal usage for a cached season.",
+      },
+      {
+        label: "Season Compare",
+        query: `compare ${formatPersonName(multiSeasonPitcher.player_name)} ${comparePitchPhrase} previous season vs current season same span`,
+        detail: "Compare pitch behavior across matching date spans.",
+      },
     ];
   }, [cacheMetadata?.pitch_types, pitchers]);
 
@@ -4119,15 +4162,17 @@ function App() {
               {isParsingQuery ? "Parsing..." : "Ask"}
             </button>
           </form>
-          <div className="query-examples" aria-label="Example questions">
-            <span>Try</span>
+          <div className="query-examples" aria-label="Guided demo questions">
+            <span>Demo Guide</span>
             {sampleQueries.map((example) => (
               <button
-                key={example}
+                key={example.label}
                 type="button"
-                onClick={() => setAskQuery(example)}
+                onClick={() => setAskQuery(example.query)}
               >
-                {example}
+                <strong>{example.label}</strong>
+                <small>{example.detail}</small>
+                <em>{example.query}</em>
               </button>
             ))}
           </div>

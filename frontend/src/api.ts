@@ -8,7 +8,7 @@ export async function getHealth(): Promise<HealthResponse> {
   const response = await fetch(`${API_URL}/health`);
 
   if (!response.ok) {
-    throw new Error(`Backend returned ${response.status}`);
+    throw new Error("The demo backend is still waking up. Try again in a moment.");
   }
 
   return response.json();
@@ -379,11 +379,20 @@ async function responseError(response: Response, fallback: string) {
   return fallback;
 }
 
+function friendlyApiError(action: string, status: number) {
+  if (status === 404) return `${action} was not found in the demo data.`;
+  if (status === 408 || status === 425 || status === 429) {
+    return `${action} is taking longer than expected. Try again in a moment.`;
+  }
+  if (status >= 500) return `${action} is temporarily unavailable. Try again in a moment.`;
+  return `${action} could not be completed.`;
+}
+
 export async function getPitchers(): Promise<CachedPitchersResponse> {
   const response = await fetch(`${API_URL}/pitchers`);
 
   if (!response.ok) {
-    throw new Error(await responseError(response, `Pitchers returned ${response.status}`));
+    throw new Error(await responseError(response, friendlyApiError("Cached pitchers", response.status)));
   }
 
   return response.json();
@@ -393,7 +402,7 @@ export async function getCacheMetadata(): Promise<CacheMetadataResponse> {
   const response = await fetch(`${API_URL}/cache/metadata`);
 
   if (!response.ok) {
-    throw new Error(await responseError(response, `Cache metadata returned ${response.status}`));
+    throw new Error(await responseError(response, friendlyApiError("Demo data coverage", response.status)));
   }
 
   return response.json();
@@ -425,7 +434,7 @@ export async function getPitchFilterOptions(
   );
 
   if (!response.ok) {
-    throw new Error(await responseError(response, `Pitch options returned ${response.status}`));
+    throw new Error(await responseError(response, friendlyApiError("Pitch filters", response.status)));
   }
 
   return response.json();
@@ -447,7 +456,7 @@ export async function searchPitches(filters: PitchFilters): Promise<PitchSearchR
   );
 
   if (!response.ok) {
-    throw new Error(await responseError(response, `Pitch search returned ${response.status}`));
+    throw new Error(await responseError(response, friendlyApiError("Pitch search", response.status)));
   }
 
   return response.json();
@@ -469,7 +478,7 @@ export async function getPitchSummary(filters: PitchFilters): Promise<PitchSumma
   );
 
   if (!response.ok) {
-    throw new Error(await responseError(response, `Pitch summary returned ${response.status}`));
+    throw new Error(await responseError(response, friendlyApiError("Pitch summary", response.status)));
   }
 
   return response.json();
@@ -491,7 +500,7 @@ export async function downloadPitchCsv(filters: PitchFilters): Promise<Blob> {
   );
 
   if (!response.ok) {
-    throw new Error(await responseError(response, `Pitch export returned ${response.status}`));
+    throw new Error(await responseError(response, friendlyApiError("Pitch export", response.status)));
   }
 
   return response.blob();
@@ -513,7 +522,7 @@ export async function getProfilePitches(filters: PitchFilters): Promise<PitchSea
   );
 
   if (!response.ok) {
-    throw new Error(await responseError(response, `Profile pitches returned ${response.status}`));
+    throw new Error(await responseError(response, friendlyApiError("Profile pitches", response.status)));
   }
 
   return response.json();
@@ -535,7 +544,7 @@ export async function getProfileSummary(filters: PitchFilters): Promise<ProfileS
   );
 
   if (!response.ok) {
-    throw new Error(await responseError(response, `Profile summary returned ${response.status}`));
+    throw new Error(await responseError(response, friendlyApiError("Pitcher profile", response.status)));
   }
 
   return response.json();
@@ -565,7 +574,7 @@ export async function getPitchDataQuality(
   );
 
   if (!response.ok) {
-    throw new Error(await responseError(response, `Pitch data quality returned ${response.status}`));
+    throw new Error(await responseError(response, friendlyApiError("Data quality", response.status)));
   }
 
   return response.json();
@@ -597,7 +606,7 @@ export async function getPitchHeatmap(
   );
 
   if (!response.ok) {
-    throw new Error(await responseError(response, `Pitch heatmap returned ${response.status}`));
+    throw new Error(await responseError(response, friendlyApiError("Pitch heatmap", response.status)));
   }
 
   return response.json();
@@ -623,7 +632,7 @@ export async function comparePitcher(
 
   if (!response.ok) {
     throw new Error(
-      await responseError(response, `Pitcher comparison returned ${response.status}`),
+      await responseError(response, friendlyApiError("Comparison", response.status)),
     );
   }
 
@@ -640,7 +649,7 @@ export async function parseNaturalLanguageQuery(query: string): Promise<RelaySki
   });
 
   if (!response.ok) {
-    throw new Error(await responseError(response, `Query parser returned ${response.status}`));
+    throw new Error(await responseError(response, friendlyApiError("Ask Relay", response.status)));
   }
 
   return response.json();
