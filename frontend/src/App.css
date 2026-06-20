@@ -794,6 +794,24 @@ button:disabled {
   text-align: right;
 }
 
+.section-heading-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.section-heading-actions span {
+  border: 1px solid var(--relay-border-soft);
+  border-radius: 999px;
+  background: var(--relay-surface-soft);
+  color: var(--relay-muted);
+  font-size: 12px;
+  font-weight: 900;
+  padding: 7px 10px;
+}
+
 .filter-panel {
   display: grid;
   gap: 14px;
@@ -2356,6 +2374,159 @@ button:disabled {
   background: var(--relay-surface);
   padding: 14px;
   box-shadow: var(--relay-shadow-flat);
+}
+
+.no-results-suggestions {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 18px;
+  border: 1px solid color-mix(in srgb, var(--relay-primary) 26%, var(--relay-border));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--relay-primary-soft) 44%, var(--relay-surface));
+  padding: 14px;
+  box-shadow: var(--relay-shadow-flat);
+}
+
+.suggestion-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.suggestion-card {
+  display: grid;
+  gap: 6px;
+  min-height: 118px;
+  border: 1px solid var(--relay-border-soft);
+  border-radius: 12px;
+  background: var(--relay-surface);
+  color: inherit;
+  padding: 11px;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: var(--relay-shadow-flat);
+}
+
+.suggestion-card:hover {
+  border-color: var(--relay-primary);
+  transform: translateY(-1px);
+}
+
+.suggestion-card span {
+  color: var(--relay-text);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.suggestion-card small {
+  color: var(--relay-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.suggestion-card strong {
+  align-self: end;
+  color: var(--relay-primary);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.loading-skeleton-stack {
+  display: grid;
+  gap: 14px;
+  margin: 16px 0 20px;
+}
+
+.skeleton-panel {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--relay-border);
+  border-radius: 18px;
+  background: var(--relay-surface);
+  box-shadow: var(--relay-shadow-flat);
+  padding: 16px;
+  overflow: hidden;
+}
+
+.skeleton-panel--chart {
+  min-height: 300px;
+}
+
+.skeleton-line,
+.skeleton-metric,
+.skeleton-chart {
+  position: relative;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--relay-border-soft) 72%, transparent);
+}
+
+.skeleton-line::after,
+.skeleton-metric::after,
+.skeleton-chart::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--relay-primary-soft) 48%, transparent),
+    transparent
+  );
+  transform: translateX(-100%);
+  animation: relay-skeleton 1.35s ease-in-out infinite;
+  will-change: transform;
+}
+
+.skeleton-line {
+  height: 12px;
+  width: min(340px, 64%);
+}
+
+.skeleton-line--title {
+  height: 18px;
+  width: min(260px, 52%);
+}
+
+.skeleton-line--short {
+  width: 52%;
+}
+
+.skeleton-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.skeleton-metric {
+  display: grid;
+  gap: 10px;
+  min-height: 82px;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.skeleton-chart {
+  min-height: 220px;
+  border-radius: 14px;
+}
+
+@keyframes relay-skeleton {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-line::after,
+  .skeleton-metric::after,
+  .skeleton-chart::after {
+    animation: none;
+  }
 }
 
 .no-results-diagnostics-heading {
@@ -3990,6 +4161,8 @@ tbody tr:last-child td {
   .data-overview-grid,
   .data-cache-facts,
   .no-results-diagnostics-grid,
+  .suggestion-grid,
+  .skeleton-metric-grid,
   .drilldown-summary-grid,
   .profile-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4102,6 +4275,15 @@ tbody tr:last-child td {
 
   .no-results-diagnostics-grid {
     grid-template-columns: 1fr;
+  }
+
+  .suggestion-grid,
+  .skeleton-metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .suggestion-card {
+    min-height: 0;
   }
 
   .data-overview-grid,

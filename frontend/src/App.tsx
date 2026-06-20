@@ -67,6 +67,13 @@ type NoResultsDiagnostic = {
   status: "ok" | "warning" | "fail" | "unknown";
   detail: string;
 };
+type NoResultsSuggestion = {
+  id: string;
+  label: string;
+  detail: string;
+  actionLabel: string;
+  filters: PitchFilters;
+};
 type ExplorerAnswerSnapshot = {
   filters: PitchFilters;
   results: PitchResult[];
@@ -78,6 +85,7 @@ type ExplorerAnswerSnapshot = {
   dataQualityMetrics: DataQualityMetric[];
   dataQualityPitchCount: number;
   noResultsDiagnostics: NoResultsDiagnostic[];
+  noResultsSuggestions: NoResultsSuggestion[];
 };
 
 type CompareAnswerSnapshot = {
@@ -863,6 +871,7 @@ function App() {
   const [resultDataQualityMetrics, setResultDataQualityMetrics] = useState<DataQualityMetric[]>([]);
   const [dataQualityPitchCount, setDataQualityPitchCount] = useState(0);
   const [noResultsDiagnostics, setNoResultsDiagnostics] = useState<NoResultsDiagnostic[]>([]);
+  const [noResultsSuggestions, setNoResultsSuggestions] = useState<NoResultsSuggestion[]>([]);
   const [lastPitchSearchFilters, setLastPitchSearchFilters] = useState<PitchFilters | null>(null);
   const [isHeatmapLoading, setIsHeatmapLoading] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -922,6 +931,7 @@ function App() {
   const [collapsedHomeAnswers, setCollapsedHomeAnswers] = useState<Record<string, boolean>>({});
   const [homeHeatmapLoading, setHomeHeatmapLoading] = useState<Record<string, boolean>>({});
   const [didAutoRunRoute, setDidAutoRunRoute] = useState(false);
+  const [shareNotice, setShareNotice] = useState("");
   const profileLoadRequestId = useRef(0);
 
   function toggleTheme() {
@@ -1018,6 +1028,7 @@ function App() {
         setResultDataQualityMetrics([]);
         setDataQualityPitchCount(0);
         setNoResultsDiagnostics([]);
+        setNoResultsSuggestions([]);
         setLastPitchSearchFilters(null);
         setSearchError(null);
       }
@@ -1395,6 +1406,169 @@ function App() {
     }
 
     return diagnostics;
+  }
+
+  function buildNoResultsSuggestions(
+    searchFilters: PitchFilters,
+    scopedOptions: PitchFilterOptions,
+    pitcher: CachedPitcher | undefined,
+  ): NoResultsSuggestion[] {
+    if (!pitcher) return [];
+
+    const suggestions: NoResultsSuggestion[] = [];
+    const addSuggestion = (
+      id: string,
+      label: string,
+      detail: string,
+      actionLabel: string,
+      filters: PitchFilters,
+    ) => {
+      if (suggestions.some((suggestion) => suggestion.id === id)) return;
+      suggestions.push({ id, label, detail, actionLabel, filters });
+    };
+    const baseFilters: PitchFilters = {
+      ...searchFilters,
+      pitcher_id: String(pitcher.pitcher),
+      pitcher_name: formatPersonName(pitcher.player_name),
+    };
+    const availablePitchTypes = scopedOptions.pitch_types.filter(Boolean);
+    const availableSeasons = Array.from(
+      new Set(
+        scopedOptions.game_dates
+          .map((game) => dateFromIso(game.game_date).getFullYear())
+          .filter((season) => !Number.isNaN(season)),
+      ),
+    ).sort((a, b) => b - a);
+
+    if (searchFilters.season && availableSeasons.length > 0 && !availableSeasons.includes(Number(searchFilters.season))) {
+      const season = String(availableSeasons[0]);
+      addSuggestion(
+        `season-${season}`,
+        `Use ${season}`,
+        `${formatPersonName(pitcher.player_name)} has cached pitches in ${season}.`,
+        `Search ${season}`,
+        {
+          ...baseFilters,
+          season,
+          single_game: "",
+          start_date: "",
+          end_date: "",
+        },
+      );
+    }
+
+    const requestedPitchTypes = splitPitchTypes(searchFilters.pitch_type);
+    const requestedGroupTypes = searchFilters.pitch_type_group
+      ? pitchTypeGroups[searchFilters.pitch_type_group] ?? []
+      : [];
+    const missingPitchTypes = (requestedPitchTypes.length ? requestedPitchTypes : requestedGroupTypes).filter(
+      (pitchType) => !availablePitchTypes.includes(pitchType),
+    );
+    if (missingPitchTypes.length > 0 && availablePitchTypes.length > 0) {
+      availablePitchTypes.slice(0, 3).forEach((pitchType) => {
+        addSuggestion(
+          `pitch-${pitchType}`,
+          `Try ${formatPitchType(pitchType)}`,
+          `${formatPersonName(pitcher.player_name)} has ${formatPitchTypeWithCode(pitchType)} in the cached data.`,
+          "Search this pitch",
+          {
+            ...baseFilters,
+            pitch_type: pitchType,
+            pitch_type_group: "",
+          },
+        );
+      });
+    }
+
+    if (searchFilters.single_game || searchFilters.start_date || searchFilters.end_date) {
+      addSuggestion(
+        "clear-date",
+        "Broaden the dates",
+        "The selected game or date range may be eliminating the matching pitches.",
+        "Clear date filters",
+        {
+          ...baseFilters,
+          single_game: "",
+          start_date: "",
+          end_date: "",
+        },
+      );
+    }
+
+    if (searchFilters.pitch_type || searchFilters.pitch_type_group) {
+      addSuggestion(
+        "clear-pitch",
+        "Show all pitch types",
+        "Keep the pitcher and time window, but remove the pitch-type restriction.",
+        "Clear pitch filter",
+        {
+          ...baseFilters,
+          pitch_type: "",
+          pitch_type_group: "",
+        },
+      );
+    }
+
+    if (searchFilters.batter_hand) {
+      addSuggestion(
+        "clear-batter-side",
+        "Use both batter sides",
+        "The handedness split may be too narrow with the other filters.",
+        "Clear batter side",
+        {
+          ...baseFilters,
+          batter_hand: "",
+        },
+      );
+    }
+
+    if (searchFilters.min_velocity || searchFilters.max_velocity) {
+      addSuggestion(
+        "clear-velocity",
+        "Remove velocity limits",
+        "Velocity cutoffs can hide otherwise valid pitches.",
+        "Clear velocity",
+        {
+          ...baseFilters,
+          min_velocity: "",
+          max_velocity: "",
+        },
+      );
+    }
+
+    if (searchFilters.count || searchFilters.count_group || searchFilters.balls || searchFilters.strikes || searchFilters.location_filter) {
+      addSuggestion(
+        "clear-count-location",
+        "Broaden count and location",
+        "Count and zone filters are often the fastest way to over-narrow a search.",
+        "Clear count/location",
+        {
+          ...baseFilters,
+          count: "",
+          count_group: "",
+          balls: "",
+          strikes: "",
+          location_filter: "",
+        },
+      );
+    }
+
+    if (searchFilters.description || searchFilters.events || searchFilters.base_state) {
+      addSuggestion(
+        "clear-outcomes",
+        "Remove outcome context",
+        "Pitch result, plate appearance result, and base-state filters can leave very small samples.",
+        "Clear outcomes",
+        {
+          ...baseFilters,
+          description: "",
+          events: "",
+          base_state: "",
+        },
+      );
+    }
+
+    return suggestions.slice(0, 5);
   }
 
   function compareCachedDates() {
@@ -2157,6 +2331,8 @@ function App() {
     if (!pitcher) {
       setFilters(completedFilters);
       setSearchError("Choose a cached pitcher before searching.");
+      setNoResultsDiagnostics([]);
+      setNoResultsSuggestions([]);
       return null;
     }
 
@@ -2164,6 +2340,8 @@ function App() {
     setIsSearching(true);
     setIsHeatmapLoading(true);
     setSearchError(null);
+    setNoResultsDiagnostics([]);
+    setNoResultsSuggestions([]);
 
     try {
       const queryFilters = pitcherIdQueryFilters(completedFilters);
@@ -2181,15 +2359,21 @@ function App() {
       setResultDataQualityMetrics(dataQualityResponse.metrics);
       setDataQualityPitchCount(dataQualityResponse.pitch_count);
       setLastPitchSearchFilters(queryFilters);
-      const diagnostics =
+      const [diagnostics, suggestions]: [NoResultsDiagnostic[], NoResultsSuggestion[]] =
         response.total_count === 0
-          ? buildNoResultsDiagnostics(
-              queryFilters,
-              await getPitchFilterOptions(queryFilters),
-              pitcher,
-            )
-          : [];
+          ? await Promise.all([
+              getPitchFilterOptions(queryFilters),
+              getPitchFilterOptions({
+                pitcher_id: String(pitcher.pitcher),
+                pitcher_name: "",
+              }),
+            ]).then(([diagnosticOptions, scopedOptions]) => [
+              buildNoResultsDiagnostics(queryFilters, diagnosticOptions, pitcher),
+              buildNoResultsSuggestions(queryFilters, scopedOptions, pitcher),
+            ])
+          : [[], []];
       setNoResultsDiagnostics(diagnostics);
+      setNoResultsSuggestions(suggestions);
       setAskNotice(null);
       return {
         filters: queryFilters,
@@ -2202,6 +2386,7 @@ function App() {
         dataQualityMetrics: dataQualityResponse.metrics,
         dataQualityPitchCount: dataQualityResponse.pitch_count,
         noResultsDiagnostics: diagnostics,
+        noResultsSuggestions: suggestions,
       };
     } catch (error) {
       setResults([]);
@@ -2212,6 +2397,7 @@ function App() {
       setResultDataQualityMetrics([]);
       setDataQualityPitchCount(0);
       setNoResultsDiagnostics([]);
+      setNoResultsSuggestions([]);
       setLastPitchSearchFilters(null);
       setSearchError(error instanceof Error ? error.message : "Search failed");
       return null;
@@ -2219,6 +2405,21 @@ function App() {
       setIsSearching(false);
       setIsHeatmapLoading(false);
     }
+  }
+
+  function applyNoResultsSuggestion(suggestion: NoResultsSuggestion) {
+    void runPitchSearch(suggestion.filters, heatmapMode);
+  }
+
+  async function copyCurrentUrl() {
+    const url = window.location.href;
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareNotice("Link copied");
+    } catch {
+      setShareNotice("Copy failed");
+    }
+    window.setTimeout(() => setShareNotice(""), 1800);
   }
 
   async function runCompareSearch(searchFilters: CompareFilters): Promise<CompareAnswerSnapshot | null> {
@@ -2414,6 +2615,7 @@ function App() {
     setHeatmap(null);
     setLastPitchSearchFilters(null);
     setNoResultsDiagnostics([]);
+    setNoResultsSuggestions([]);
     setHeatmapMode(nextHeatmapMode);
 
     setSearchError(null);
@@ -2703,6 +2905,7 @@ function App() {
     setResultDataQualityMetrics([]);
     setDataQualityPitchCount(0);
     setNoResultsDiagnostics([]);
+    setNoResultsSuggestions([]);
     setLastPitchSearchFilters(null);
     setSearchError(null);
   }
@@ -3412,6 +3615,7 @@ function App() {
       setResultDataQualityMetrics(answer.explorer.dataQualityMetrics);
       setDataQualityPitchCount(answer.explorer.dataQualityPitchCount);
       setNoResultsDiagnostics(answer.explorer.noResultsDiagnostics);
+      setNoResultsSuggestions(answer.explorer.noResultsSuggestions ?? []);
       setLastPitchSearchFilters(answer.explorer.filters);
       setLastAppliedQuery(answer.query);
       setExplorerFocus({ target: answer.target, nonce: Date.now() });
@@ -4080,6 +4284,8 @@ function App() {
           averageNumbers,
           openProfileInExplorer,
           openProfileInCompare,
+          copyCurrentUrl,
+          shareNotice,
         }}
       />
 
@@ -4127,6 +4333,10 @@ function App() {
           dataQualityMetrics: resultDataQualityMetrics,
           dataQualityPitchCount,
           noResultsDiagnostics,
+          noResultsSuggestions,
+          applyNoResultsSuggestion,
+          copyCurrentUrl,
+          shareNotice,
           explorerFocus,
           lastAppliedQuery: activeView === "explorer" ? lastAppliedQuery : "",
           focusedResultTarget: ""
@@ -4196,6 +4406,8 @@ function App() {
           formatBatter,
           formatDescription,
           formatEvent,
+          copyCurrentUrl,
+          shareNotice,
           compareFocus,
           lastAppliedQuery: activeView === "compare" ? lastAppliedQuery : "",
           focusedResultTarget: ""

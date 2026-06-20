@@ -269,6 +269,8 @@ function PitcherProfileView({ hidden, context }: PitcherProfileViewProps) {
     averageNumbers,
     openProfileInExplorer,
     openProfileInCompare,
+    copyCurrentUrl,
+    shareNotice,
   } = context;
   const selectedPitcher = selectedProfilePitcher() ?? resolvableProfilePitcher();
   const summaries = useMemo(
@@ -418,15 +420,47 @@ function PitcherProfileView({ hidden, context }: PitcherProfileViewProps) {
     setInspectedOutcomeBucket("");
   }
 
+  function renderProfileSkeleton() {
+    return (
+      <div className="loading-skeleton-stack" aria-label="Loading pitcher profile">
+        <section className="skeleton-panel">
+          <div className="skeleton-line skeleton-line--title" />
+          <div className="skeleton-metric-grid">
+            {Array.from({ length: 5 }, (_unused, index) => (
+              <div className="skeleton-metric" key={index}>
+                <div className="skeleton-line" />
+                <div className="skeleton-line skeleton-line--short" />
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="skeleton-panel skeleton-panel--chart">
+          <div className="skeleton-line skeleton-line--title" />
+          <div className="skeleton-chart" />
+        </section>
+      </div>
+    );
+  }
+
   return (
     <section className="page-section" aria-labelledby="pitcher-profile-title" hidden={hidden}>
       <div className="section-heading">
-        <h2 id="pitcher-profile-title">Pitcher Profile</h2>
-        {selectedPitcher ? (
-          <span>
-            {formatDate(selectedPitcher.first_game_date)} to {formatDate(selectedPitcher.last_game_date)}
-          </span>
-        ) : null}
+        <div>
+          <h2 id="pitcher-profile-title">Pitcher Profile</h2>
+          {selectedPitcher ? (
+            <p>
+              {formatDate(selectedPitcher.first_game_date)} to {formatDate(selectedPitcher.last_game_date)}
+            </p>
+          ) : (
+            <p>Open a cached pitcher profile and share the exact season and pitch selection.</p>
+          )}
+        </div>
+        <div className="section-heading-actions">
+          {shareNotice ? <span>{shareNotice}</span> : null}
+          <button className="secondary-button compact-action-button" onClick={copyCurrentUrl} type="button">
+            Copy Link
+          </button>
+        </div>
       </div>
 
       <section className="filter-panel profile-filter-panel">
@@ -494,6 +528,8 @@ function PitcherProfileView({ hidden, context }: PitcherProfileViewProps) {
           </div>
         </section>
       ) : null}
+
+      {isProfileLoading && !hasProfileData ? renderProfileSkeleton() : null}
 
       {hasProfileData ? (
         <>
@@ -769,17 +805,15 @@ function PitcherProfileView({ hidden, context }: PitcherProfileViewProps) {
             </div>
           </section>
         </>
-      ) : (
+      ) : !isProfileLoading ? (
         <div className="empty-state profile-empty-state">
           <p>
-            {isProfileLoading
-              ? "Loading pitcher profile..."
-              : selectedPitcher
+            {selectedPitcher
                 ? "Profile data will appear after Relay matches the selected cached pitcher."
                 : "Choose a cached pitcher to begin."}
           </p>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }

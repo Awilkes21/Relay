@@ -16,6 +16,13 @@ type PitchExplorerViewContext = Record<string, any> & {
     status: "ok" | "warning" | "fail" | "unknown";
     detail: string;
   }>;
+  noResultsSuggestions: Array<{
+    id: string;
+    label: string;
+    detail: string;
+    actionLabel: string;
+    filters: any;
+  }>;
   results: any[];
   sortedResults: any[];
 };
@@ -66,6 +73,10 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
     dataQualityMetrics,
     dataQualityPitchCount,
     noResultsDiagnostics,
+    noResultsSuggestions,
+    applyNoResultsSuggestion,
+    copyCurrentUrl,
+    shareNotice,
     explorerFocus,
     lastAppliedQuery,
     focusedResultTarget
@@ -183,6 +194,52 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
     );
   }
 
+  function renderNoResultsSuggestions() {
+    if (!noResultsSuggestions.length) return null;
+
+    return (
+      <div className="no-results-suggestions">
+        <div className="no-results-diagnostics-heading">Try this instead</div>
+        <div className="suggestion-grid">
+          {noResultsSuggestions.map((suggestion) => (
+            <button
+              className="suggestion-card"
+              key={suggestion.id}
+              onClick={() => applyNoResultsSuggestion(suggestion)}
+              type="button"
+            >
+              <span>{suggestion.label}</span>
+              <small>{suggestion.detail}</small>
+              <strong>{suggestion.actionLabel}</strong>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  function renderExplorerSkeleton() {
+    return (
+      <div className="loading-skeleton-stack" aria-label="Loading pitch results">
+        <section className="skeleton-panel">
+          <div className="skeleton-line skeleton-line--title" />
+          <div className="skeleton-metric-grid">
+            {Array.from({ length: 5 }, (_unused, index) => (
+              <div className="skeleton-metric" key={index}>
+                <div className="skeleton-line" />
+                <div className="skeleton-line skeleton-line--short" />
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="skeleton-panel skeleton-panel--chart">
+          <div className="skeleton-line skeleton-line--title" />
+          <div className="skeleton-chart" />
+        </section>
+      </div>
+    );
+  }
+
   function qualityMetric(key: string) {
     return dataQualityMetrics.find((metric) => metric.key === key);
   }
@@ -288,7 +345,16 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
         hidden={hidden}
       >
         <div className="section-heading">
-          <h2 id="pitch-explorer-title">Pitch Explorer</h2>
+          <div>
+            <h2 id="pitch-explorer-title">Pitch Explorer</h2>
+            <p>Inspect cached Statcast pitch data and share the exact search.</p>
+          </div>
+          <div className="section-heading-actions">
+            {shareNotice ? <span>{shareNotice}</span> : null}
+            <button className="secondary-button compact-action-button" onClick={copyCurrentUrl} type="button">
+              Copy Link
+            </button>
+          </div>
         </div>
 
         {lastAppliedQuery ? (
@@ -454,13 +520,16 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
         {shouldShowNoResultsDiagnostics ? (
           <>
             <div className="focused-empty-notice">
-              No pitches matched this query. Try removing or modifying some filters.
+              No pitches matched this query. Relay checked the cached pitcher, date, pitch, and filter context below.
             </div>
             {renderNoResultsDiagnostics()}
+            {renderNoResultsSuggestions()}
           </>
         ) : null}
 
-        {dataQualityPitchCount > 0 && dataQualityMetrics.length > 0 && shouldShowResult(["data_quality"]) ? (
+        {isSearching ? renderExplorerSkeleton() : null}
+
+        {!isSearching && dataQualityPitchCount > 0 && dataQualityMetrics.length > 0 && shouldShowResult(["data_quality"]) ? (
           <section className="chart-panel data-quality-panel focus-scroll-target" id="relay-data-quality">
             <div className="chart-heading collapsible-heading">
               <div>
@@ -503,7 +572,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
           </section>
         ) : null}
 
-        {shouldShowResult(["summary"]) ? (
+        {!isSearching && shouldShowResult(["summary"]) ? (
         <div className="results-header focus-scroll-target" id="relay-explorer-results">
           <h3>Results</h3>
           <div className="results-header-actions">
@@ -515,7 +584,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
           </div>
         </div>
         ) : null}
-        {arsenalSummary.length > 0 && shouldShowResult(["arsenal"]) ? (
+        {!isSearching && arsenalSummary.length > 0 && shouldShowResult(["arsenal"]) ? (
           <section className="chart-panel focus-scroll-target" id="relay-arsenal-summary">
             <div className="chart-heading collapsible-heading">
               <h3>Arsenal Summary</h3>
@@ -562,7 +631,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
             </div>
           </section>
         ) : null}
-        {shouldShowResult(["heatmap"]) ? (
+        {!isSearching && shouldShowResult(["heatmap"]) ? (
         <div className="focus-scroll-target" id="relay-pitch-heatmap">
           {heatmapMode === "hard_contact" ? battedBallQualityNote() : null}
           <PitchHeatmap
@@ -574,19 +643,19 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
           />
         </div>
         ) : null}
-        {shouldShowResult(["strike_zone"]) ? (
+        {!isSearching && shouldShowResult(["strike_zone"]) ? (
         <div className="focus-scroll-target" id="relay-strike-zone">
           <StrikeZoneChart pitches={results} />
         </div>
         ) : null}
-        {shouldShowResult(["movement"]) ? (
+        {!isSearching && shouldShowResult(["movement"]) ? (
         <div className="focus-scroll-target" id="relay-movement">
           {movementQualityNote()}
           <MovementChart pitches={results} />
         </div>
         ) : null}
 
-        {results.length > 0 && shouldShowResult(["table"]) ? (
+        {!isSearching && results.length > 0 && shouldShowResult(["table"]) ? (
           <div className="table-disclosure-bar focus-scroll-target" id="relay-pitch-table">
             <div>
               <span>Pitch Table</span>
@@ -620,7 +689,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
           </div>
         ) : null}
 
-        {shouldShowResult(["table"]) ? (
+        {!isSearching && shouldShowResult(["table"]) ? (
         <div className="table-wrap" hidden={results.length > 0 && collapsedSections.resultsTable && !isFocusedResult}>
           {results.length > 0 ? (
             <table>

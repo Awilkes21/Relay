@@ -88,6 +88,8 @@ function CompareView({ hidden, context }: CompareViewProps) {
     formatBatter,
     formatDescription,
     formatEvent,
+    copyCurrentUrl,
+    shareNotice,
     compareFocus,
     lastAppliedQuery,
     focusedResultTarget
@@ -409,6 +411,28 @@ function CompareView({ hidden, context }: CompareViewProps) {
     return insights.slice(0, 3);
   }
 
+  function renderCompareSkeleton() {
+    return (
+      <div className="loading-skeleton-stack" aria-label="Loading comparison">
+        <section className="skeleton-panel">
+          <div className="skeleton-line skeleton-line--title" />
+          <div className="skeleton-metric-grid">
+            {Array.from({ length: 6 }, (_unused, index) => (
+              <div className="skeleton-metric" key={index}>
+                <div className="skeleton-line" />
+                <div className="skeleton-line skeleton-line--short" />
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="skeleton-panel skeleton-panel--chart">
+          <div className="skeleton-line skeleton-line--title" />
+          <div className="skeleton-chart" />
+        </section>
+      </div>
+    );
+  }
+
   return (
       <section
         className="page-section"
@@ -416,7 +440,16 @@ function CompareView({ hidden, context }: CompareViewProps) {
         hidden={hidden}
       >
           <div className="section-heading">
-            <h2 id="compare-title">Pitcher Compare</h2>
+            <div>
+              <h2 id="compare-title">Pitcher Compare</h2>
+              <p>Compare two spans and share the exact pitcher, pitch, and period setup.</p>
+            </div>
+            <div className="section-heading-actions">
+              {shareNotice ? <span>{shareNotice}</span> : null}
+              <button className="secondary-button compact-action-button" onClick={copyCurrentUrl} type="button">
+                Copy Link
+              </button>
+            </div>
           </div>
 
           {lastAppliedQuery ? (
@@ -705,8 +738,9 @@ function CompareView({ hidden, context }: CompareViewProps) {
           </form>
 
           {compareError ? <div className="error-banner">{compareError}</div> : null}
+          {isComparing ? renderCompareSkeleton() : null}
 
-          {comparison ? (
+          {!isComparing && comparison ? (
             <>
               <div className="compare-result-header">
                 <div>
