@@ -401,14 +401,14 @@ function PitcherProfileView({ hidden, context }: PitcherProfileViewProps) {
 
   useEffect(() => {
     if (trendSummaries.length === 0) {
-      if (profilePitchType) setProfilePitchType("");
+      if (!isProfileLoading && profileSummary && profilePitchType) setProfilePitchType("");
       return;
     }
 
     if (!trendSummaries.some((pitch) => pitch.pitchType === profilePitchType)) {
       setProfilePitchType(trendSummaries[0].pitchType);
     }
-  }, [profilePitchType, setProfilePitchType, trendSummaries]);
+  }, [isProfileLoading, profilePitchType, profileSummary, setProfilePitchType, trendSummaries]);
 
   useEffect(() => {
     setInspectedOutcomeBucket("");
