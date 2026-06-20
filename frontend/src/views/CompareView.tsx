@@ -938,6 +938,7 @@ function CompareView({ hidden, context }: CompareViewProps) {
                   periodA={compareHeatmapA}
                   periodB={compareHeatmapB}
                   isLoading={isCompareHeatmapLoading}
+                  onLoadHeatmaps={() => void loadCompareHeatmaps(compareFilters, compareHeatmapMode)}
                   periodAStart={comparison.period_a.start}
                   periodAEnd={comparison.period_a.end}
                   periodBStart={comparison.period_b.start}

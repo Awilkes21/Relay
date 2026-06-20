@@ -106,6 +106,9 @@ type StoredQuery = {
   id: string;
   query: string;
   skill: RelaySkillCall["skill"];
+  args?: RelaySkillCall["args"];
+  warnings?: string[];
+  parser?: string;
   target: string;
   view: "explorer" | "compare" | "profile";
   created_at: string;
@@ -1982,6 +1985,9 @@ function App() {
       id: crypto.randomUUID(),
       query,
       skill: call.skill,
+      args: call.args,
+      warnings: call.warnings,
+      parser: call.parser,
       target: skillFocus(call.args),
       view,
       created_at: new Date().toISOString(),
@@ -2029,12 +2035,40 @@ function App() {
     });
   }
 
-  function useStoredQuery(query: StoredQuery) {
-    setAskQuery(query.query);
-    setSkillCall(null);
+  async function openStoredQuery(query: StoredQuery) {
+    const queryText = query.query.trim();
+    if (!queryText) return;
+
+    setAskQuery(queryText);
     setAskError(null);
     setAskNotice(null);
-    setActiveView("home");
+
+    let nextSkillCall: RelaySkillCall | null = null;
+    if (query.args) {
+      nextSkillCall = {
+        skill: query.skill,
+        args: query.args,
+        warnings: query.warnings ?? [],
+        parser: query.parser ?? "stored",
+      };
+    } else {
+      setIsParsingQuery(true);
+      try {
+        nextSkillCall = await parseNaturalLanguageQuery(queryText);
+        rememberRecentQuery(queryText, nextSkillCall);
+      } catch (error) {
+        setSkillCall(null);
+        setActiveView("home");
+        setAskError(error instanceof Error ? error.message : "Query parsing failed");
+      } finally {
+        setIsParsingQuery(false);
+      }
+    }
+
+    if (!nextSkillCall) return;
+
+    setSkillCall(nextSkillCall);
+    await applyParsedSkillCall(queryText, nextSkillCall, { openFullPage: true });
   }
 
   function triggerExplorerFocus(target: string) {
@@ -2221,7 +2255,7 @@ function App() {
 
     try {
       const queryFilters = pitcherIdQueryFilters(searchFilters);
-      const response = await comparePitcher(queryFilters, compareHeatmapMode);
+      const response = await comparePitcher(queryFilters, compareHeatmapMode, true);
       const nextPitchTypes = collectPitchTypes(response);
       setComparison(response);
       setComparePitchTypes(nextPitchTypes);
@@ -2250,27 +2284,28 @@ function App() {
     }
   }
 
-  async function applySkillCall() {
-    if (!skillCall) return;
-
+  async function applyParsedSkillCall(
+    queryText: string,
+    call: RelaySkillCall,
+    options: { openFullPage?: boolean } = {},
+  ) {
     setAskNotice(null);
     setAskError(null);
-    const focus = skillFocus(skillCall.args);
-    const queryText = askQuery.trim();
+    const focus = skillFocus(call.args);
     setLastAppliedQuery(queryText);
 
-    if (skillCall.skill === "open_pitcher_profile") {
+    if (call.skill === "open_pitcher_profile") {
       const profile = openPitcherProfileFromContext({
-        pitcherName: typeof skillCall.args.pitcher_name === "string" ? skillCall.args.pitcher_name : "",
-        season: skillCall.args.season ? String(skillCall.args.season) : "",
-        pitchType: skillCall.args.pitch_type ? String(skillCall.args.pitch_type) : "",
+        pitcherName: typeof call.args.pitcher_name === "string" ? call.args.pitcher_name : "",
+        season: call.args.season ? String(call.args.season) : "",
+        pitchType: call.args.pitch_type ? String(call.args.pitch_type) : "",
         appliedQuery: queryText,
       });
 
       if (profile) {
         appendHomeAnswer({
           view: "profile",
-          target: skillFocus(skillCall.args) || "profile",
+          target: skillFocus(call.args) || "profile",
           query: queryText,
           profile,
         });
@@ -2278,12 +2313,12 @@ function App() {
       return;
     }
 
-    if (skillCall.skill === "compare_pitcher_periods") {
-      const shouldFocusAnswer = Boolean(focus);
+    if (call.skill === "compare_pitcher_periods") {
+      const shouldFocusAnswer = Boolean(focus) && !options.openFullPage;
       setActiveView(shouldFocusAnswer ? "home" : "compare");
       const scopedFilters = completePitcherName({
         ...initialCompareFilters,
-        ...skillArgsToCompareFilters(skillCall.args),
+        ...skillArgsToCompareFilters(call.args),
       });
       setCompareFilters(scopedFilters);
       setComparison(null);
@@ -2295,9 +2330,9 @@ function App() {
       setDrilldownB([]);
       setCompareError(null);
 
-      const preset = skillCall.args.preset ? String(skillCall.args.preset) : "";
-      const periodASeason = Number(skillCall.args.period_a_season);
-      const periodBSeason = Number(skillCall.args.period_b_season);
+      const preset = call.args.preset ? String(call.args.preset) : "";
+      const periodASeason = Number(call.args.period_a_season);
+      const periodBSeason = Number(call.args.period_b_season);
       const pitcher = selectedPitcherForFilters(scopedFilters);
       if (periodASeason && periodBSeason && pitcher && preset !== "previous_current_same_span") {
         try {
@@ -2316,7 +2351,7 @@ function App() {
             if (shouldFocusAnswer && snapshot) {
               appendHomeAnswer({ view: "compare", target: focus, query: queryText, compare: snapshot });
             } else {
-              triggerCompareFocus("summary");
+              triggerCompareFocus(focus || "summary");
             }
             return;
           }
@@ -2348,7 +2383,7 @@ function App() {
             if (shouldFocusAnswer && snapshot) {
               appendHomeAnswer({ view: "compare", target: focus, query: queryText, compare: snapshot });
             } else {
-              triggerCompareFocus("summary");
+              triggerCompareFocus(focus || "summary");
             }
             return;
           }
@@ -2374,15 +2409,15 @@ function App() {
       return;
     }
 
-    const explorerTarget = focus || (skillCall.skill === "get_pitch_heatmap" ? "heatmap" : "");
-    const shouldFocusAnswer = Boolean(explorerTarget);
-    const nextHeatmapMode = skillCall.args.mode &&
-      ["all", "whiffs", "hard_contact", "in_zone"].includes(String(skillCall.args.mode))
-        ? (String(skillCall.args.mode) as HeatmapMode)
+    const explorerTarget = focus || (call.skill === "get_pitch_heatmap" ? "heatmap" : "");
+    const shouldFocusAnswer = Boolean(explorerTarget) && !options.openFullPage;
+    const nextHeatmapMode = call.args.mode &&
+      ["all", "whiffs", "hard_contact", "in_zone"].includes(String(call.args.mode))
+        ? (String(call.args.mode) as HeatmapMode)
         : heatmapMode;
     const nextFilters: PitchFilters = {
       ...initialFilters,
-      ...skillArgsToPitchFilters(skillCall.args),
+      ...skillArgsToPitchFilters(call.args),
       pitcher_id: "",
     };
 
@@ -2403,6 +2438,11 @@ function App() {
     } else {
       triggerExplorerFocus(explorerTarget);
     }
+  }
+
+  async function applySkillCall() {
+    if (!skillCall) return;
+    await applyParsedSkillCall(askQuery.trim(), skillCall);
   }
 
   function updateFilter(name: keyof PitchFilters, value: string) {
@@ -3788,7 +3828,7 @@ function App() {
             <div className="query-library-item" key={query.id}>
               <button
                 className="query-library-button"
-                onClick={() => useStoredQuery(query)}
+                onClick={() => void openStoredQuery(query)}
                 type="button"
               >
                 <strong>{query.query}</strong>

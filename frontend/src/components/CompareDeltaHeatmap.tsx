@@ -8,6 +8,7 @@ type CompareDeltaHeatmapProps = {
   periodA: PitchHeatmapResponse | null;
   periodB: PitchHeatmapResponse | null;
   isLoading: boolean;
+  onLoadHeatmaps?: () => void;
   periodAEnd?: string;
   periodAStart?: string;
   periodBEnd?: string;
@@ -309,6 +310,7 @@ function CompareDeltaHeatmap({
   periodAStart,
   periodBEnd,
   periodBStart,
+  onLoadHeatmaps,
   pitcherHand,
   batterHand,
   pitchType,
@@ -317,6 +319,8 @@ function CompareDeltaHeatmap({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [hoverReadout, setHoverReadout] = useState<HoverReadout | null>(null);
   const baseHeatmap = periodB ?? periodA;
+  const hasPeriodDates = Boolean(periodAStart && periodAEnd && periodBStart && periodBEnd);
+  const isMissingHeatmaps = hasPeriodDates && (!periodA || !periodB);
   const sideLabels = horizontalSideLabels(pitcherHand);
   const deltaCells = useMemo(
     () => (periodA && periodB ? buildDeltaCells(periodA, periodB) : []),
@@ -553,7 +557,18 @@ function CompareDeltaHeatmap({
           </div>
         ) : null}
         {!isLoading && deltaCells.length === 0 ? (
-          <p className="chart-empty">Run a comparison to see location deltas.</p>
+          <div className="chart-empty">
+            <p>
+              {isMissingHeatmaps
+                ? "Load period heatmaps to see location deltas."
+                : "Run a comparison to see location deltas."}
+            </p>
+            {isMissingHeatmaps && onLoadHeatmaps ? (
+              <button className="secondary-button compact-action-button" onClick={onLoadHeatmaps} type="button">
+                Load Heatmaps
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </div>
       </div>
