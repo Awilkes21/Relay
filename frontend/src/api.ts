@@ -152,6 +152,29 @@ export type PitchSearchResponse = {
   results: PitchResult[];
 };
 
+export type PitchArsenalSummary = {
+  pitch_type: string;
+  count: number;
+  velocity: number | null;
+  spin: number | null;
+  ivb: number | null;
+  hb: number | null;
+  strikes: number;
+  whiffs: number;
+  located_count: number;
+  zone_count: number;
+  balls_in_play: number;
+  contacted_count: number;
+  hard_contact_count: number;
+  average_exit_velocity: number | null;
+  max_exit_velocity: number | null;
+};
+
+export type PitchSummaryResponse = {
+  pitch_count: number;
+  arsenal: PitchArsenalSummary[];
+};
+
 export type ProfileSummaryMetrics = {
   average_velocity: number | null;
   average_spin: number | null;
@@ -264,6 +287,9 @@ export type PeriodMetrics = {
   average_induced_vertical_break: Record<string, number>;
   average_horizontal_break: Record<string, number>;
   average_arm_angle: Record<string, number>;
+  strike_rate_by_pitch_type: Record<string, number | null>;
+  whiff_rate_by_pitch_type: Record<string, number | null>;
+  zone_rate_by_pitch_type: Record<string, number | null>;
   arm_angle: number | null;
   strike_rate: number | null;
   whiff_rate: number | null;
@@ -279,6 +305,9 @@ export type CompareDelta = {
   average_induced_vertical_break: Record<string, number | null>;
   average_horizontal_break: Record<string, number | null>;
   average_arm_angle: Record<string, number | null>;
+  strike_rate_by_pitch_type: Record<string, number | null>;
+  whiff_rate_by_pitch_type: Record<string, number | null>;
+  zone_rate_by_pitch_type: Record<string, number | null>;
   arm_angle: number | null;
   strike_rate: number | null;
   whiff_rate: number | null;
@@ -422,6 +451,50 @@ export async function searchPitches(filters: PitchFilters): Promise<PitchSearchR
   }
 
   return response.json();
+}
+
+export async function getPitchSummary(filters: PitchFilters): Promise<PitchSummaryResponse> {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    const trimmedValue = Array.isArray(value) ? value.filter(Boolean).join(",") : value?.trim();
+    if (trimmedValue && key !== "single_game" && key !== "count" && key !== "result_order" && key !== "limit") {
+      params.set(key, trimmedValue);
+    }
+  });
+
+  const queryString = params.toString();
+  const response = await fetch(
+    `${API_URL}/pitches/summary${queryString ? `?${queryString}` : ""}`,
+  );
+
+  if (!response.ok) {
+    throw new Error(await responseError(response, `Pitch summary returned ${response.status}`));
+  }
+
+  return response.json();
+}
+
+export async function downloadPitchCsv(filters: PitchFilters): Promise<Blob> {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    const trimmedValue = Array.isArray(value) ? value.filter(Boolean).join(",") : value?.trim();
+    if (trimmedValue && key !== "single_game" && key !== "count" && key !== "limit") {
+      params.set(key, trimmedValue);
+    }
+  });
+
+  const queryString = params.toString();
+  const response = await fetch(
+    `${API_URL}/pitches/export${queryString ? `?${queryString}` : ""}`,
+  );
+
+  if (!response.ok) {
+    throw new Error(await responseError(response, `Pitch export returned ${response.status}`));
+  }
+
+  return response.blob();
 }
 
 export async function getProfilePitches(filters: PitchFilters): Promise<PitchSearchResponse> {

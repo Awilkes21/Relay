@@ -97,6 +97,10 @@ def _summarize_period(pitches: list[dict[str, Any]]) -> dict[str, Any]:
     ivb_by_pitch_type: dict[str, list[float]] = defaultdict(list)
     horizontal_break_by_pitch_type: dict[str, list[float]] = defaultdict(list)
     arm_angle_by_pitch_type: dict[str, list[float]] = defaultdict(list)
+    strike_by_pitch_type: dict[str, int] = defaultdict(int)
+    whiff_by_pitch_type: dict[str, int] = defaultdict(int)
+    located_by_pitch_type: dict[str, int] = defaultdict(int)
+    zone_by_pitch_type: dict[str, int] = defaultdict(int)
 
     strike_count = 0
     whiff_count = 0
@@ -141,15 +145,19 @@ def _summarize_period(pitches: list[dict[str, Any]]) -> dict[str, Any]:
         description = pitch.get("description")
         if description in STRIKE_DESCRIPTIONS:
             strike_count += 1
+            strike_by_pitch_type[pitch_type] += 1
         if description in WHIFF_DESCRIPTIONS:
             whiff_count += 1
+            whiff_by_pitch_type[pitch_type] += 1
 
         # Zone rate only uses pitches with both coordinates present. The zone
         # bounds are a fixed rule-of-thumb strike zone in Statcast plate_x/z feet.
         if pitch.get("plate_x") is not None and pitch.get("plate_z") is not None:
             located_pitch_count += 1
+            located_by_pitch_type[pitch_type] += 1
             if _is_in_zone(pitch):
                 zone_pitch_count += 1
+                zone_by_pitch_type[pitch_type] += 1
 
         p_throws = pitch.get("p_throws")
         if p_throws in {"L", "R"}:
@@ -174,6 +182,18 @@ def _summarize_period(pitches: list[dict[str, Any]]) -> dict[str, Any]:
             horizontal_break_by_pitch_type
         ),
         "average_arm_angle": _average_by_pitch_type(arm_angle_by_pitch_type),
+        "strike_rate_by_pitch_type": {
+            pitch_type: _rate(strike_by_pitch_type[pitch_type], count)
+            for pitch_type, count in sorted(pitch_type_counts.items())
+        },
+        "whiff_rate_by_pitch_type": {
+            pitch_type: _rate(whiff_by_pitch_type[pitch_type], count)
+            for pitch_type, count in sorted(pitch_type_counts.items())
+        },
+        "zone_rate_by_pitch_type": {
+            pitch_type: _rate(zone_by_pitch_type[pitch_type], located_by_pitch_type[pitch_type])
+            for pitch_type in sorted(pitch_type_counts)
+        },
         "arm_angle": _average(arm_angles),
         "strike_rate": _rate(strike_count, pitch_count),
         "whiff_rate": _rate(whiff_count, pitch_count),
@@ -223,6 +243,9 @@ def _period_delta(
         ),
         "average_horizontal_break": metric_delta("average_horizontal_break"),
         "average_arm_angle": metric_delta("average_arm_angle"),
+        "strike_rate_by_pitch_type": metric_delta("strike_rate_by_pitch_type"),
+        "whiff_rate_by_pitch_type": metric_delta("whiff_rate_by_pitch_type"),
+        "zone_rate_by_pitch_type": metric_delta("zone_rate_by_pitch_type"),
         "arm_angle": _delta(period_a["arm_angle"], period_b["arm_angle"]),
         "strike_rate": _delta(period_a["strike_rate"], period_b["strike_rate"]),
         "whiff_rate": _delta(period_a["whiff_rate"], period_b["whiff_rate"]),

@@ -85,9 +85,6 @@ function CompareView({ hidden, context }: CompareViewProps) {
     setDrilldownPitchType,
     setDrilldownA,
     setDrilldownB,
-    whiffRateFromPitches,
-    zoneRateFromPitches,
-    rateDelta,
     formatBatter,
     formatDescription,
     formatEvent,
@@ -1352,25 +1349,27 @@ function CompareView({ hidden, context }: CompareViewProps) {
                       },
                       {
                         label: "Whiff Rate",
-                        period1: formatRate(whiffRateFromPitches(drilldownA)),
-                        period2: formatRate(whiffRateFromPitches(drilldownB)),
+                        period1: formatRate(
+                          comparison.period_a.metrics.whiff_rate_by_pitch_type[drilldownPitchType],
+                        ),
+                        period2: formatRate(
+                          comparison.period_b.metrics.whiff_rate_by_pitch_type[drilldownPitchType],
+                        ),
                         delta: formatDelta(
-                          rateDelta(
-                            whiffRateFromPitches(drilldownA),
-                            whiffRateFromPitches(drilldownB),
-                          ),
+                          comparison.deltas.whiff_rate_by_pitch_type[drilldownPitchType],
                           "rate",
                         ),
                       },
                       {
                         label: "Zone Rate",
-                        period1: formatRate(zoneRateFromPitches(drilldownA)),
-                        period2: formatRate(zoneRateFromPitches(drilldownB)),
+                        period1: formatRate(
+                          comparison.period_a.metrics.zone_rate_by_pitch_type[drilldownPitchType],
+                        ),
+                        period2: formatRate(
+                          comparison.period_b.metrics.zone_rate_by_pitch_type[drilldownPitchType],
+                        ),
                         delta: formatDelta(
-                          rateDelta(
-                            zoneRateFromPitches(drilldownA),
-                            zoneRateFromPitches(drilldownB),
-                          ),
+                          comparison.deltas.zone_rate_by_pitch_type[drilldownPitchType],
                           "rate",
                         ),
                       },

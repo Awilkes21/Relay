@@ -141,6 +141,69 @@ class PitchesApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
 
+    def test_get_pitch_summary_uses_filters(self):
+        summary = {
+            "pitch_count": 42,
+            "arsenal": [
+                {
+                    "pitch_type": "FF",
+                    "count": 30,
+                    "velocity": 96.1,
+                    "spin": 2400,
+                    "ivb": 15.2,
+                    "hb": -8.3,
+                    "strikes": 20,
+                    "whiffs": 6,
+                    "located_count": 29,
+                    "zone_count": 14,
+                    "balls_in_play": 8,
+                    "contacted_count": 7,
+                    "hard_contact_count": 2,
+                    "average_exit_velocity": 88.2,
+                    "max_exit_velocity": 103.5,
+                }
+            ],
+        }
+
+        with patch("app.api.pitches.get_pitch_summary", return_value=summary) as get_summary:
+            response = TestClient(app).get(
+                "/pitches/summary",
+                params={"pitcher_id": 605400, "season": 2024, "pitch_type": "FF"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), summary)
+        get_summary.assert_called_once()
+        self.assertEqual(get_summary.call_args.args[0]["pitcher_id"], 605400)
+        self.assertEqual(get_summary.call_args.args[0]["season"], 2024)
+        self.assertEqual(get_summary.call_args.args[0]["pitch_type"], "FF")
+
+    def test_export_pitches_disables_limit_and_returns_csv(self):
+        row = {
+            "game_date": "2024-04-01",
+            "player_name": "Example Pitcher",
+            "pitcher": 605400,
+            "pitch_type": "FF",
+            "release_speed": 97.5,
+        }
+
+        with patch(
+            "app.api.pitches.search_pitches",
+            return_value={"total_count": 1, "results": [row]},
+        ) as search:
+            response = TestClient(app).get(
+                "/pitches/export",
+                params={"pitcher_id": 605400, "season": 2024, "limit": 1},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response.headers["content-type"])
+        self.assertIn("game_date", response.text.splitlines()[0])
+        self.assertIn("2024-04-01", response.text)
+        search.assert_called_once()
+        self.assertEqual(search.call_args.args[0]["limit"], None)
+        self.assertIn("select_fields", search.call_args.kwargs)
+
     def test_get_profile_pitches_requires_pitcher_and_season_and_disables_limit(self):
         row = {
             "game_date": "2024-04-01",

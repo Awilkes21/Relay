@@ -43,6 +43,11 @@ class PitchSearchResponse(BaseModel):
     results: list[dict[str, Any]]
 
 
+class PitchSummaryResponse(BaseModel):
+    pitch_count: int
+    arsenal: list[dict[str, Any]]
+
+
 class ProfileSummaryResponse(BaseModel):
     pitch_count: int
     metrics: dict[str, Any]

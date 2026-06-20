@@ -1,6 +1,9 @@
+import csv
+from io import StringIO
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from app.api.errors import raise_service_error
 from app.api.schemas import (
@@ -10,12 +13,14 @@ from app.api.schemas import (
     PitchFilterOptionsResponse,
     PitchHeatmapResponse,
     PitchSearchResponse,
+    PitchSummaryResponse,
     ProfileSummaryResponse,
 )
 from app.services.pitch_query_service import (
     get_cache_metadata,
     get_pitch_data_quality,
     get_pitch_heatmap,
+    get_pitch_summary,
     get_pitcher_profile_summary,
     list_cached_pitchers,
     list_pitch_filter_options,
@@ -78,6 +83,21 @@ MOVEMENT_METADATA = {
 
 def _compact_pitch(row: dict[str, Any]) -> dict[str, Any]:
     return {field: row.get(field) for field in PITCH_FIELDS}
+
+
+def _csv_rows(rows: list[dict[str, Any]]):
+    buffer = StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=PITCH_FIELDS, extrasaction="ignore")
+    writer.writeheader()
+    yield buffer.getvalue()
+    buffer.seek(0)
+    buffer.truncate(0)
+
+    for row in rows:
+        writer.writerow(_compact_pitch(row))
+        yield buffer.getvalue()
+        buffer.seek(0)
+        buffer.truncate(0)
 
 
 class PitchFilterParams:
@@ -212,6 +232,35 @@ def get_pitches(
         "movement": MOVEMENT_METADATA,
         "results": results,
     }
+
+
+@router.get("/pitches/summary", response_model=PitchSummaryResponse)
+def get_pitches_summary(filters: PitchFilterParams = Depends()) -> dict[str, Any]:
+    try:
+        return get_pitch_summary(filters.to_filters())
+    except Exception as exc:
+        raise_service_error(exc)
+
+
+@router.get("/pitches/export")
+def export_pitches(
+    filters: PitchFilterParams = Depends(),
+    result_order: ResultOrder = Query(default="latest", pattern=RESULT_ORDER_PATTERN),
+) -> StreamingResponse:
+    pitch_filters = filters.to_filters()
+    pitch_filters["result_order"] = result_order
+    pitch_filters["limit"] = None
+
+    try:
+        search_response = search_pitches(pitch_filters, select_fields=PITCH_FIELDS)
+    except Exception as exc:
+        raise_service_error(exc)
+
+    return StreamingResponse(
+        _csv_rows(search_response["results"]),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="relay-pitches.csv"'},
+    )
 
 
 @router.get("/pitches/profile", response_model=PitchSearchResponse)

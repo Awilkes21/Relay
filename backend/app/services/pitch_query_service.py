@@ -39,9 +39,9 @@ STRIKE_DESCRIPTIONS = (
     "swinging_strike_blocked",
 )
 PITCH_TYPE_GROUPS = {
-    "fastball": ("FF", "SI", "FC"),
+    "fastball": ("FF", "SI", "FC", "FA"),
     "breaking": ("SL", "ST", "CU", "KC", "SV"),
-    "offspeed": ("CH", "FS", "FO", "SC"),
+    "offspeed": ("CH", "FS", "FO", "SC", "EP"),
 }
 
 
@@ -385,6 +385,69 @@ def search_pitches(
             "total_count": total_count,
             "results": results,
         }
+
+
+def get_pitch_summary(
+    filters: dict[str, Any],
+    parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
+) -> dict[str, Any]:
+    return _get_pitch_summary_cached(
+        _cache_signature(parquet_path),
+        _filter_signature(filters),
+    )
+
+
+@lru_cache(maxsize=128)
+def _get_pitch_summary_cached(
+    cache_key: tuple[str, int, int, str, int, int],
+    filter_signature: tuple[tuple[str, Any], ...],
+) -> dict[str, Any]:
+    return _get_pitch_summary_uncached(_filters_from_signature(filter_signature), cache_key[0])
+
+
+def _get_pitch_summary_uncached(
+    filters: dict[str, Any],
+    parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
+) -> dict[str, Any]:
+    where_sql, params = _build_where_clause(filters)
+    strike_values = _sql_in_values(STRIKE_DESCRIPTIONS)
+    whiff_values = _sql_in_values(WHIFF_DESCRIPTIONS)
+    zone_condition = _zone_condition()
+    batted_ball_condition = "description IN ('hit_into_play', 'hit_into_play_no_out', 'hit_into_play_score')"
+
+    total_query = "SELECT count(*) AS pitch_count FROM statcast_pitches" + where_sql
+    arsenal_query = (
+        "SELECT "
+        "COALESCE(pitch_type, 'Unknown') AS pitch_type, "
+        "count(*) AS count, "
+        "avg(release_speed) AS velocity, "
+        "avg(release_spin_rate) AS spin, "
+        "avg(pfx_z * 12) AS ivb, "
+        "avg(pfx_x * -12) AS hb, "
+        f"sum(CASE WHEN description IN {strike_values} THEN 1 ELSE 0 END) AS strikes, "
+        f"sum(CASE WHEN description IN {whiff_values} THEN 1 ELSE 0 END) AS whiffs, "
+        "sum(CASE WHEN plate_x IS NOT NULL AND plate_z IS NOT NULL THEN 1 ELSE 0 END) AS located_count, "
+        f"sum(CASE WHEN {zone_condition} THEN 1 ELSE 0 END) AS zone_count, "
+        f"sum(CASE WHEN {batted_ball_condition} THEN 1 ELSE 0 END) AS balls_in_play, "
+        "sum(CASE WHEN launch_speed IS NOT NULL THEN 1 ELSE 0 END) AS contacted_count, "
+        "sum(CASE WHEN launch_speed >= 95 THEN 1 ELSE 0 END) AS hard_contact_count, "
+        "avg(launch_speed) AS average_exit_velocity, "
+        "max(launch_speed) AS max_exit_velocity "
+        f"FROM statcast_pitches{where_sql} "
+        "GROUP BY COALESCE(pitch_type, 'Unknown') "
+        "ORDER BY count DESC"
+    )
+
+    with statcast_connection(parquet_path) as connection:
+        pitch_count = int(connection.execute(total_query, params).fetchone()[0] or 0)
+        arsenal_cursor = connection.execute(arsenal_query, params)
+        arsenal_columns = [description[0] for description in arsenal_cursor.description]
+        arsenal = _rows_to_dicts(arsenal_columns, arsenal_cursor.fetchall())
+
+    return {
+        "pitch_count": pitch_count,
+        "arsenal": arsenal,
+    }
 
 
 def get_pitch_data_quality(

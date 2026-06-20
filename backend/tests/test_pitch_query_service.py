@@ -82,10 +82,10 @@ class PitchQueryServiceTests(unittest.TestCase):
 
         self.assertEqual(
             query,
-            "SELECT * FROM statcast_pitches WHERE pitch_type IN (?, ?, ?) "
+            "SELECT * FROM statcast_pitches WHERE pitch_type IN (?, ?, ?, ?) "
             "ORDER BY game_date DESC LIMIT ?",
         )
-        self.assertEqual(params, ["FF", "SI", "FC", 25])
+        self.assertEqual(params, ["FF", "SI", "FC", "FA", 25])
 
     def test_escapes_duckdb_string_literals(self):
         self.assertEqual(

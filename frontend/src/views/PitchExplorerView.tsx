@@ -46,12 +46,11 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
     totalResultCount,
     resultCount,
     results,
-    downloadCsv,
+    exportAllMatchingPitches,
     formatBatter,
     describePlateLocation,
     formatBattedBall,
     formatNumber,
-    averageNumbers,
     arsenalSummary,
     formatRate,
     heatmap,
@@ -472,7 +471,7 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
                 </p>
               </div>
               <div className="section-actions">
-                <span>These results</span>
+                <span>All matching pitches</span>
                 <button
                   aria-label={collapsedSections.dataQuality ? "Expand data quality" : "Collapse data quality"}
                   className="disclosure-button"
@@ -548,14 +547,14 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
                 </thead>
                 <tbody>
                   {arsenalSummary.map((pitch) => (
-                    <tr key={pitch.pitchType}>
-                      <td>{formatPitchType(pitch.pitchType)}</td>
+                    <tr key={pitch.pitch_type}>
+                      <td>{formatPitchType(pitch.pitch_type)}</td>
                       <td>{pitch.count}</td>
-                      <td>{formatRate(pitch.count / results.length)}</td>
-                      <td>{formatNumber(averageNumbers(pitch.velocity))}</td>
-                      <td>{formatNumber(averageNumbers(pitch.spin), 0)}</td>
-                      <td>{formatNumber(averageNumbers(pitch.ivb))}</td>
-                      <td>{formatNumber(averageNumbers(pitch.hb))}</td>
+                      <td>{formatRate(pitch.count / totalResultCount)}</td>
+                      <td>{formatNumber(pitch.velocity)}</td>
+                      <td>{formatNumber(pitch.spin, 0)}</td>
+                      <td>{formatNumber(pitch.ivb)}</td>
+                      <td>{formatNumber(pitch.hb)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -601,42 +600,10 @@ function PitchExplorerView({ hidden, context }: PitchExplorerViewProps) {
               {!isFocusedResult ? (
                 <button
                   className="secondary-button compact-action-button"
-                  onClick={() =>
-                    downloadCsv(
-                      "relay-pitches.csv",
-                      results.map((pitch) => ({
-                        game_date: formatDate(pitch.game_date),
-                        player_name: formatPersonName(pitch.player_name),
-                        batter: formatBatter(pitch),
-                        batter_hand: pitch.stand,
-                        pitch_type: pitch.pitch_type,
-                        release_speed: pitch.release_speed,
-                        release_spin_rate: pitch.release_spin_rate,
-                        p_throws: pitch.p_throws,
-                        release_pos_x: pitch.release_pos_x,
-                        release_pos_z: pitch.release_pos_z,
-                        ivb_inches: pitch.pfx_z === null ? null : pitch.pfx_z * 12,
-                        hb_inches: pitch.pfx_x === null ? null : pitch.pfx_x * 12,
-                        plate_location: describePlateLocation(pitch),
-                        plate_x: pitch.plate_x,
-                        plate_z: pitch.plate_z,
-                        batted_ball_type: formatBattedBall(pitch.bb_type),
-                        exit_velocity: pitch.launch_speed,
-                        launch_angle: pitch.launch_angle,
-                        estimated_distance: pitch.hit_distance_sc,
-                        expected_ba: pitch.estimated_ba_using_speedangle,
-                        expected_woba: pitch.estimated_woba_using_speedangle,
-                        woba_value: pitch.woba_value,
-                        balls: pitch.balls,
-                        strikes: pitch.strikes,
-                        description: pitch.description,
-                        events: pitch.events,
-                      })),
-                    )
-                  }
+                  onClick={() => void exportAllMatchingPitches()}
                   type="button"
                 >
-                  Export CSV
+                  Export All CSV
                 </button>
               ) : null}
               <button

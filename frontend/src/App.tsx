@@ -14,15 +14,18 @@ import {
   type RelaySkillCall,
   type SavedComparison,
   comparePitcher,
+  downloadPitchCsv,
   getCacheMetadata,
   getPitchDataQuality,
   getPitchHeatmap,
   getHealth,
   getPitchFilterOptions,
   getPitchers,
+  getPitchSummary,
   getProfileSummary,
   parseNaturalLanguageQuery,
   searchPitches,
+  type PitchSummaryResponse,
   type ProfileSummaryResponse,
 } from "./api";
 import PitchExplorerView from "./views/PitchExplorerView";
@@ -69,6 +72,7 @@ type ExplorerAnswerSnapshot = {
   results: PitchResult[];
   resultCount: number;
   totalResultCount: number;
+  pitchSummary: PitchSummaryResponse | null;
   heatmap: PitchHeatmapResponse | null;
   heatmapMode: HeatmapMode;
   dataQualityMetrics: DataQualityMetric[];
@@ -445,8 +449,6 @@ const battedBallLabels: Record<string, string> = {
   popup: "Popup",
 };
 
-const whiffDescriptions = new Set(["swinging_strike", "swinging_strike_blocked"]);
-
 function formatValue(value: string | number | null | undefined) {
   return value ?? "";
 }
@@ -518,6 +520,15 @@ function downloadCsv(filename: string, rows: Array<Record<string, string | numbe
     ...rows.map((row) => columns.map((column) => csvEscape(row[column])).join(",")),
   ].join("\n");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadBlob(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
@@ -603,7 +614,7 @@ function NoResultsDiagnostics({ diagnostics }: { diagnostics: NoResultsDiagnosti
 }
 
 const pitchTypeGroups: Record<string, string[]> = {
-  fastball: ["FF", "SI", "FC"],
+  fastball: ["FF", "SI", "FC", "FA"],
   breaking: ["SL", "CU", "KC", "ST", "SV"],
   offspeed: ["CH", "FS", "FO", "SC", "EP"],
 };
@@ -657,39 +668,6 @@ function formatNumberWithUnit(
 ) {
   if (value === null || value === undefined) return "-";
   return `${value.toFixed(digits)} ${unit}`;
-}
-
-function rateFromPitches(pitches: PitchResult[], predicate: (pitch: PitchResult) => boolean) {
-  if (pitches.length === 0) return null;
-  return pitches.filter(predicate).length / pitches.length;
-}
-
-function zoneRateFromPitches(pitches: PitchResult[]) {
-  const locatedPitches = pitches.filter(
-    (pitch) => pitch.plate_x !== null && pitch.plate_z !== null,
-  );
-  if (locatedPitches.length === 0) return null;
-
-  return (
-    locatedPitches.filter(
-      (pitch) =>
-        pitch.plate_x !== null &&
-        pitch.plate_z !== null &&
-        Math.abs(pitch.plate_x) <= 0.83 &&
-        pitch.plate_z >= 1.5 &&
-        pitch.plate_z <= 3.5,
-    ).length / locatedPitches.length
-  );
-}
-
-function whiffRateFromPitches(pitches: PitchResult[]) {
-  return rateFromPitches(pitches, (pitch) =>
-    pitch.description ? whiffDescriptions.has(pitch.description) : false,
-  );
-}
-
-function rateDelta(period1Rate: number | null, period2Rate: number | null) {
-  return period1Rate === null || period2Rate === null ? null : period2Rate - period1Rate;
 }
 
 function titleCaseCode(value: string) {
@@ -879,6 +857,7 @@ function App() {
   const [results, setResults] = useState<PitchResult[]>([]);
   const [resultCount, setResultCount] = useState(0);
   const [totalResultCount, setTotalResultCount] = useState(0);
+  const [pitchSummary, setPitchSummary] = useState<PitchSummaryResponse | null>(null);
   const [heatmap, setHeatmap] = useState<PitchHeatmapResponse | null>(null);
   const [heatmapMode, setHeatmapMode] = useState<HeatmapMode>(initialRoute.heatmapMode);
   const [resultDataQualityMetrics, setResultDataQualityMetrics] = useState<DataQualityMetric[]>([]);
@@ -1034,6 +1013,7 @@ function App() {
         setResults([]);
         setResultCount(0);
         setTotalResultCount(0);
+        setPitchSummary(null);
         setHeatmap(null);
         setResultDataQualityMetrics([]);
         setDataQualityPitchCount(0);
@@ -1210,7 +1190,7 @@ function App() {
         typeof currentFilters.pitch_type === "string" &&
         currentFilters.pitch_type &&
         pitchOptions.pitch_types.length > 0 &&
-        !pitchOptions.pitch_types.includes(currentFilters.pitch_type)
+        !splitPitchTypes(currentFilters.pitch_type).some((pitchType) => pitchOptions.pitch_types.includes(pitchType))
       ) {
         nextFilters.pitch_type = "";
         changed = true;
@@ -2187,14 +2167,16 @@ function App() {
 
     try {
       const queryFilters = pitcherIdQueryFilters(completedFilters);
-      const [response, heatmapResponse, dataQualityResponse] = await Promise.all([
+      const [response, heatmapResponse, dataQualityResponse, summaryResponse] = await Promise.all([
         searchPitches(queryFilters),
         getPitchHeatmap(queryFilters, mode),
         getPitchDataQuality(queryFilters),
+        getPitchSummary(queryFilters),
       ]);
       setResults(response.results);
       setResultCount(response.count);
       setTotalResultCount(response.total_count);
+      setPitchSummary(summaryResponse);
       setHeatmap(heatmapResponse);
       setResultDataQualityMetrics(dataQualityResponse.metrics);
       setDataQualityPitchCount(dataQualityResponse.pitch_count);
@@ -2214,6 +2196,7 @@ function App() {
         results: response.results,
         resultCount: response.count,
         totalResultCount: response.total_count,
+        pitchSummary: summaryResponse,
         heatmap: heatmapResponse,
         heatmapMode: mode,
         dataQualityMetrics: dataQualityResponse.metrics,
@@ -2224,6 +2207,7 @@ function App() {
       setResults([]);
       setResultCount(0);
       setTotalResultCount(0);
+      setPitchSummary(null);
       setHeatmap(null);
       setResultDataQualityMetrics([]);
       setDataQualityPitchCount(0);
@@ -2426,6 +2410,7 @@ function App() {
     setResults([]);
     setResultCount(0);
     setTotalResultCount(0);
+    setPitchSummary(null);
     setHeatmap(null);
     setLastPitchSearchFilters(null);
     setNoResultsDiagnostics([]);
@@ -2713,6 +2698,7 @@ function App() {
     setResults([]);
     setResultCount(0);
     setTotalResultCount(0);
+    setPitchSummary(null);
     setHeatmap(null);
     setResultDataQualityMetrics([]);
     setDataQualityPitchCount(0);
@@ -3188,6 +3174,15 @@ function App() {
     await runPitchSearch(filters, heatmapMode);
   }
 
+  async function exportAllMatchingPitches() {
+    const exportFilters = lastPitchSearchFilters ?? pitcherIdQueryFilters(completePitcherName(filters));
+    try {
+      downloadBlob("relay-pitches.csv", await downloadPitchCsv(exportFilters));
+    } catch (error) {
+      setSearchError(error instanceof Error ? error.message : "Pitch export failed");
+    }
+  }
+
   async function updateHeatmapMode(mode: HeatmapMode) {
     setHeatmapMode(mode);
     if (!lastPitchSearchFilters) return;
@@ -3358,32 +3353,7 @@ function App() {
       }),
     [results, pitchSort],
   );
-  const arsenalSummary = useMemo(
-    () =>
-      Array.from(
-        results.reduce((groups, pitch) => {
-          const pitchType = pitch.pitch_type ?? "Unknown";
-          const current = groups.get(pitchType) ?? {
-            pitchType,
-            count: 0,
-            velocity: [] as number[],
-            spin: [] as number[],
-            ivb: [] as number[],
-            hb: [] as number[],
-          };
-          current.count += 1;
-          if (pitch.release_speed !== null) current.velocity.push(pitch.release_speed);
-          if (pitch.release_spin_rate !== null) current.spin.push(pitch.release_spin_rate);
-          if (pitch.pfx_z !== null) current.ivb.push(pitch.pfx_z * 12);
-          if (pitch.pfx_x !== null) current.hb.push(pitch.pfx_x * 12);
-          groups.set(pitchType, current);
-          return groups;
-        }, new Map<string, { pitchType: string; count: number; velocity: number[]; spin: number[]; ivb: number[]; hb: number[] }>()),
-      )
-        .map((entry) => entry[1])
-        .sort((a, b) => b.count - a.count),
-    [results],
-  );
+  const arsenalSummary = pitchSummary?.arsenal ?? [];
   const activePitchFilterList = useMemo(
     () => activePitchFilters(),
     [filters, pitchOptions],
@@ -3408,7 +3378,7 @@ function App() {
           dateFromIso(pitcher.last_game_date).getFullYear(),
       ) ?? sortedPitchers[0];
     const comparePitchPhrase =
-      pitchPhraseFromTypes(pitchTypes, ["CU", "SL", "ST", "KC", "CH", "FF"]) ?? "four seam fastballs";
+      pitchPhraseFromTypes(pitchTypes, ["KC", "CU", "SL", "ST", "CH", "FF"]) ?? "four seam fastballs";
 
     return [
       `${formatPersonName(firstPitcher.player_name)} fastballs over 97 to left handed hitters`,
@@ -3436,6 +3406,7 @@ function App() {
       setResults(answer.explorer.results);
       setResultCount(answer.explorer.resultCount);
       setTotalResultCount(answer.explorer.totalResultCount);
+      setPitchSummary(answer.explorer.pitchSummary);
       setHeatmap(answer.explorer.heatmap);
       setHeatmapMode(answer.explorer.heatmapMode);
       setResultDataQualityMetrics(answer.explorer.dataQualityMetrics);
@@ -4136,11 +4107,11 @@ function App() {
           resultCount,
           results,
           downloadCsv,
+          exportAllMatchingPitches,
           formatBatter,
           describePlateLocation,
           formatBattedBall,
           formatNumber,
-          averageNumbers,
           arsenalSummary,
           formatRate,
           heatmap,
@@ -4222,9 +4193,6 @@ function App() {
           setDrilldownPitchType,
           setDrilldownA,
           setDrilldownB,
-          whiffRateFromPitches,
-          zoneRateFromPitches,
-          rateDelta,
           formatBatter,
           formatDescription,
           formatEvent,

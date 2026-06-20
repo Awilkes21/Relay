@@ -168,7 +168,7 @@ class NaturalLanguageQueryServiceTests(unittest.TestCase):
             result["args"],
             {
                 "pitcher_name": "Aaron Nola",
-                "pitch_type": "CU",
+                "pitch_type": "CU,KC",
                 "preset": "previous_current_same_span",
             },
         )
@@ -225,12 +225,32 @@ class NaturalLanguageQueryServiceTests(unittest.TestCase):
             result["args"],
             {
                 "pitcher_name": "Paul Skenes",
-                "pitch_type": "CU",
+                "pitch_type": "CU,KC",
                 "season": __import__("datetime").date.today().year,
                 "focus": "heatmap",
                 "mode": "all",
             },
         )
+
+    def test_generic_curveball_includes_knuckle_curves(self):
+        result = self.parser().parse("Dylan Cease curveballs")
+
+        self.assertEqual(result["args"].get("pitch_type"), "CU,KC")
+
+    def test_specific_knuckle_curve_stays_specific(self):
+        result = self.parser().parse("Dylan Cease knuckle curves")
+
+        self.assertEqual(result["args"].get("pitch_type"), "KC")
+
+    def test_knuckleball_query_is_not_treated_as_knuckle_curve(self):
+        result = self.parser().parse("George Kirby knuckleballs")
+
+        self.assertEqual(result["args"].get("pitch_type"), "KN")
+
+    def test_split_finger_aliases_match_splitters(self):
+        result = self.parser().parse("Kevin Gausman split finger fastballs")
+
+        self.assertEqual(result["args"].get("pitch_type"), "FS")
 
     def test_routes_movement_queries(self):
         result = self.parser().parse("show Nola sinker movement profile")
