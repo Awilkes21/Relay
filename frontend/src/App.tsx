@@ -3620,6 +3620,18 @@ function App() {
         </div>
       );
     }
+    const hasSnapshotHeatmaps = Boolean(snapshot.heatmapA && snapshot.heatmapB);
+    const isSnapshotHeatmapLoading = Boolean(homeHeatmapLoading[answer.id]);
+    const loadHomeHeatmapsButton = (
+      <button
+        className="secondary-button"
+        disabled={isSnapshotHeatmapLoading}
+        onClick={() => updateHomeCompareHeatmaps(answer, snapshot.heatmapMode)}
+        type="button"
+      >
+        {isSnapshotHeatmapLoading ? "Loading Heatmaps" : "Load Heatmaps"}
+      </button>
+    );
 
     if (answer.target === "movement" || answer.target === "movement_diff") {
       return (
@@ -3633,13 +3645,22 @@ function App() {
     }
 
     if (answer.target === "heatmap" || answer.target === "period_heatmaps") {
+      if (!hasSnapshotHeatmaps) {
+        return (
+          <div className="empty-state bordered-empty">
+            <p>Comparison heatmaps are loaded on demand.</p>
+            {loadHomeHeatmapsButton}
+          </div>
+        );
+      }
+
       return (
         <div className="comparison-panels">
           <PitchHeatmap
             collapsible={false}
             heatmap={snapshot.heatmapA}
             mode={snapshot.heatmapMode}
-            isLoading={Boolean(homeHeatmapLoading[answer.id])}
+            isLoading={isSnapshotHeatmapLoading}
             onModeChange={(mode) => updateHomeCompareHeatmaps(answer, mode)}
             pitcherHand={comparison.pitcher_hand}
             subtitle={formatDateRange(comparison.period_a.start, comparison.period_a.end)}
@@ -3649,7 +3670,7 @@ function App() {
             collapsible={false}
             heatmap={snapshot.heatmapB}
             mode={snapshot.heatmapMode}
-            isLoading={Boolean(homeHeatmapLoading[answer.id])}
+            isLoading={isSnapshotHeatmapLoading}
             onModeChange={(mode) => updateHomeCompareHeatmaps(answer, mode)}
             pitcherHand={comparison.pitcher_hand}
             subtitle={formatDateRange(comparison.period_b.start, comparison.period_b.end)}
@@ -3660,11 +3681,20 @@ function App() {
     }
 
     if (answer.target === "location_delta") {
+      if (!hasSnapshotHeatmaps) {
+        return (
+          <div className="empty-state bordered-empty">
+            <p>Location share deltas are loaded on demand.</p>
+            {loadHomeHeatmapsButton}
+          </div>
+        );
+      }
+
       return (
         <CompareDeltaHeatmap
           periodA={snapshot.heatmapA}
           periodB={snapshot.heatmapB}
-          isLoading={false}
+          isLoading={isSnapshotHeatmapLoading}
           periodAStart={comparison.period_a.start}
           periodAEnd={comparison.period_a.end}
           periodBStart={comparison.period_b.start}
@@ -4138,6 +4168,7 @@ function App() {
           compareHeatmapB,
           compareHeatmapMode,
           isCompareHeatmapLoading,
+          loadCompareHeatmaps,
           updateCompareHeatmapMode,
           formatDateRange,
           formatRate,

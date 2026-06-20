@@ -72,6 +72,7 @@ function CompareView({ hidden, context }: CompareViewProps) {
     compareHeatmapB,
     compareHeatmapMode,
     isCompareHeatmapLoading,
+    loadCompareHeatmaps,
     updateCompareHeatmapMode,
     formatRate,
     formatNumber,
@@ -99,12 +100,14 @@ function CompareView({ hidden, context }: CompareViewProps) {
   const [isSearchCollapsed, setIsSearchCollapsed] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState({
     savedComparisons: true,
-    periodHeatmaps: false,
+    periodHeatmaps: true,
     periodTables: true,
     diffTable: false,
     drilldownPitches: true,
   });
+  const [autoHeatmapRequestKey, setAutoHeatmapRequestKey] = useState("");
   const sampleTableRowCount = 25;
+  const hasCompareHeatmaps = Boolean(compareHeatmapA && compareHeatmapB);
 
   useEffect(() => {
     if (comparison) {
@@ -113,6 +116,12 @@ function CompareView({ hidden, context }: CompareViewProps) {
       setIsSearchCollapsed(false);
     }
   }, [comparison]);
+
+  useEffect(() => {
+    if (!hasCompareHeatmaps) {
+      setAutoHeatmapRequestKey("");
+    }
+  }, [hasCompareHeatmaps]);
 
   useEffect(() => {
     if (!activeFocusTarget || hidden) return;
@@ -146,6 +155,41 @@ function CompareView({ hidden, context }: CompareViewProps) {
       });
     });
   }, [activeFocusTarget, compareFocus, hidden]);
+
+  useEffect(() => {
+    const wantsHeatmaps =
+      activeFocusTarget &&
+      ["heatmap", "period_heatmaps", "location_delta"].includes(activeFocusTarget);
+    if (
+      !wantsHeatmaps ||
+      hidden ||
+      !comparison ||
+      hasCompareHeatmaps ||
+      isCompareHeatmapLoading
+    ) {
+      return;
+    }
+
+    const requestKey = JSON.stringify({
+      filters: compareFilters,
+      mode: compareHeatmapMode,
+      target: activeFocusTarget,
+    });
+    if (requestKey === autoHeatmapRequestKey) return;
+
+    setAutoHeatmapRequestKey(requestKey);
+    void loadCompareHeatmaps(compareFilters, compareHeatmapMode);
+  }, [
+    activeFocusTarget,
+    autoHeatmapRequestKey,
+    compareFilters,
+    compareHeatmapMode,
+    comparison,
+    hasCompareHeatmaps,
+    hidden,
+    isCompareHeatmapLoading,
+    loadCompareHeatmaps,
+  ]);
 
   function toggleSection(section: keyof typeof collapsedSections) {
     setCollapsedSections((current) => ({
@@ -840,6 +884,18 @@ function CompareView({ hidden, context }: CompareViewProps) {
               <div className="results-header focus-scroll-target" id="relay-period-heatmaps">
                 <h3>Period Heatmaps</h3>
                 <div className="results-header-actions">
+                  <button
+                    className="secondary-button compact-action-button"
+                    disabled={isCompareHeatmapLoading}
+                    onClick={() => void loadCompareHeatmaps(compareFilters, compareHeatmapMode)}
+                    type="button"
+                  >
+                    {isCompareHeatmapLoading
+                      ? "Loading"
+                      : hasCompareHeatmaps
+                        ? "Refresh Heatmaps"
+                        : "Load Heatmaps"}
+                  </button>
                   <button
                     aria-label={collapsedSections.periodHeatmaps ? "Expand period heatmaps" : "Collapse period heatmaps"}
                     className="disclosure-button"

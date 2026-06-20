@@ -19,6 +19,7 @@ class CompareApiTests(unittest.TestCase):
     def test_compare_pitcher_calls_service(self):
         payload = {
             "pitcher_id": 605400,
+            "filters": {},
             "period_a": {"start": "2024-04-01", "end": "2024-04-07", "metrics": {}},
             "period_b": {"start": "2024-05-01", "end": "2024-05-07", "metrics": {}},
             "deltas": {},
@@ -46,6 +47,7 @@ class CompareApiTests(unittest.TestCase):
     def test_compare_pitcher_resolves_pitcher_name(self):
         payload = {
             "pitcher_id": 605400,
+            "filters": {},
             "period_a": {"start": "2024-04-01", "end": "2024-04-07", "metrics": {}},
             "period_b": {"start": "2024-05-01", "end": "2024-05-07", "metrics": {}},
             "deltas": {},

@@ -3,6 +3,15 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.errors import raise_service_error
+from app.api.schemas import (
+    CachedPitchersResponse,
+    CacheMetadataResponse,
+    PitchDataQualityResponse,
+    PitchFilterOptionsResponse,
+    PitchHeatmapResponse,
+    PitchSearchResponse,
+    ProfileSummaryResponse,
+)
 from app.services.pitch_query_service import (
     get_cache_metadata,
     get_pitch_data_quality,
@@ -147,7 +156,7 @@ class PitchFilterParams:
         }
 
 
-@router.get("/pitchers")
+@router.get("/pitchers", response_model=CachedPitchersResponse)
 def get_pitchers() -> dict[str, Any]:
     try:
         pitchers = list_cached_pitchers()
@@ -157,7 +166,11 @@ def get_pitchers() -> dict[str, Any]:
     return {"count": len(pitchers), "results": pitchers}
 
 
-@router.get("/cache/metadata")
+@router.get(
+    "/cache/metadata",
+    response_model=CacheMetadataResponse,
+    response_model_exclude_none=True,
+)
 def get_cache_metadata_endpoint() -> dict[str, Any]:
     try:
         return get_cache_metadata()
@@ -165,7 +178,7 @@ def get_cache_metadata_endpoint() -> dict[str, Any]:
         raise_service_error(exc)
 
 
-@router.get("/pitch-options")
+@router.get("/pitch-options", response_model=PitchFilterOptionsResponse)
 def get_pitch_options(filters: PitchFilterParams = Depends()) -> dict[str, Any]:
     option_filters = filters.to_filters()
     option_filters["min_velocity"] = None
@@ -177,7 +190,7 @@ def get_pitch_options(filters: PitchFilterParams = Depends()) -> dict[str, Any]:
         raise_service_error(exc)
 
 
-@router.get("/pitches")
+@router.get("/pitches", response_model=PitchSearchResponse)
 def get_pitches(
     filters: PitchFilterParams = Depends(),
     result_order: ResultOrder = Query(default="latest", pattern=RESULT_ORDER_PATTERN),
@@ -201,7 +214,7 @@ def get_pitches(
     }
 
 
-@router.get("/pitches/profile")
+@router.get("/pitches/profile", response_model=PitchSearchResponse)
 def get_profile_pitches(
     filters: PitchFilterParams = Depends(),
     result_order: ResultOrder = Query(default="oldest", pattern=RESULT_ORDER_PATTERN),
@@ -229,7 +242,7 @@ def get_profile_pitches(
     }
 
 
-@router.get("/pitches/profile/summary")
+@router.get("/pitches/profile/summary", response_model=ProfileSummaryResponse)
 def get_profile_summary(filters: PitchFilterParams = Depends()) -> dict[str, Any]:
     pitch_filters = filters.to_filters()
     if not pitch_filters["season"]:
@@ -243,7 +256,7 @@ def get_profile_summary(filters: PitchFilterParams = Depends()) -> dict[str, Any
         raise_service_error(exc)
 
 
-@router.get("/pitches/data-quality")
+@router.get("/pitches/data-quality", response_model=PitchDataQualityResponse)
 def get_pitches_data_quality(filters: PitchFilterParams = Depends()) -> dict[str, Any]:
     try:
         return get_pitch_data_quality(filters.to_filters())
@@ -251,7 +264,7 @@ def get_pitches_data_quality(filters: PitchFilterParams = Depends()) -> dict[str
         raise_service_error(exc)
 
 
-@router.get("/pitches/heatmap")
+@router.get("/pitches/heatmap", response_model=PitchHeatmapResponse)
 def get_pitches_heatmap(
     filters: PitchFilterParams = Depends(),
     x_bins: int = Query(default=25, ge=10, le=60),

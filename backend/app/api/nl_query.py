@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.api.errors import raise_service_error
+from app.api.schemas import SkillRegistryResponse
 from app.services.nl_query_service import get_skill_registry, parse_natural_language_query
 
 
@@ -19,6 +20,7 @@ class SkillCallResponse(BaseModel):
         "search_pitches",
         "get_pitch_heatmap",
         "compare_pitcher_periods",
+        "open_pitcher_profile",
         "summarize_arsenal",
         "summarize_movement",
     ]
@@ -35,6 +37,6 @@ def query(request: NaturalLanguageQueryRequest) -> dict[str, Any]:
         raise_service_error(exc)
 
 
-@router.get("/query/skills")
+@router.get("/query/skills", response_model=SkillRegistryResponse)
 def query_skills() -> dict[str, Any]:
     return {"skills": get_skill_registry()}

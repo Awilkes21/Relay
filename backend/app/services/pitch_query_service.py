@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from app.db.statcast import (
     DEFAULT_STATCAST_PARQUET,
     LEGACY_STATCAST_PARQUET,
+    cache_metadata_signature,
     duckdb_string_literal,
     get_statcast_cache_metadata,
     resolve_statcast_parquet,
@@ -315,6 +317,34 @@ def _rows_to_dicts(columns: list[str], rows: list[tuple[Any, ...]]) -> list[dict
     ]
 
 
+def _freeze_filter_value(value: Any) -> Any:
+    if isinstance(value, list):
+        return tuple(_freeze_filter_value(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_freeze_filter_value(item) for item in value)
+    if isinstance(value, set):
+        return tuple(sorted(_freeze_filter_value(item) for item in value))
+    return value
+
+
+def _filter_signature(filters: dict[str, Any]) -> tuple[tuple[str, Any], ...]:
+    return tuple(
+        sorted(
+            (key, _freeze_filter_value(value))
+            for key, value in filters.items()
+            if value is not None and value != ""
+        )
+    )
+
+
+def _filters_from_signature(signature: tuple[tuple[str, Any], ...]) -> dict[str, Any]:
+    return dict(signature)
+
+
+def _cache_signature(parquet_path: Path | str) -> tuple[str, int, int, str, int, int]:
+    return cache_metadata_signature(parquet_path)
+
+
 def _sql_in_values(values: tuple[str, ...]) -> str:
     return "(" + ", ".join(_duckdb_string_literal(value) for value in values) + ")"
 
@@ -422,6 +452,24 @@ def get_pitcher_profile_summary(
     filters: dict[str, Any],
     parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
 ) -> dict[str, Any]:
+    return _get_pitcher_profile_summary_cached(
+        _cache_signature(parquet_path),
+        _filter_signature(filters),
+    )
+
+
+@lru_cache(maxsize=128)
+def _get_pitcher_profile_summary_cached(
+    cache_key: tuple[str, int, int, str, int, int],
+    filter_signature: tuple[tuple[str, Any], ...],
+) -> dict[str, Any]:
+    return _get_pitcher_profile_summary_uncached(_filters_from_signature(filter_signature), cache_key[0])
+
+
+def _get_pitcher_profile_summary_uncached(
+    filters: dict[str, Any],
+    parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
+) -> dict[str, Any]:
     where_sql, params = _build_where_clause(filters)
     strike_values = _sql_in_values(STRIKE_DESCRIPTIONS)
     whiff_values = _sql_in_values(WHIFF_DESCRIPTIONS)
@@ -524,6 +572,39 @@ def get_pitch_heatmap(
     mode: str = "all",
     parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
 ) -> dict[str, Any]:
+    return _get_pitch_heatmap_cached(
+        _cache_signature(parquet_path),
+        _filter_signature(filters),
+        x_bins,
+        z_bins,
+        mode,
+    )
+
+
+@lru_cache(maxsize=128)
+def _get_pitch_heatmap_cached(
+    cache_key: tuple[str, int, int, str, int, int],
+    filter_signature: tuple[tuple[str, Any], ...],
+    x_bins: int,
+    z_bins: int,
+    mode: str,
+) -> dict[str, Any]:
+    return _get_pitch_heatmap_uncached(
+        _filters_from_signature(filter_signature),
+        x_bins,
+        z_bins,
+        mode,
+        cache_key[0],
+    )
+
+
+def _get_pitch_heatmap_uncached(
+    filters: dict[str, Any],
+    x_bins: int,
+    z_bins: int,
+    mode: str,
+    parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
+) -> dict[str, Any]:
     query, params, domain = _build_pitch_heatmap_query(filters, x_bins, z_bins, mode=mode)
 
     with statcast_connection(parquet_path) as connection:
@@ -578,6 +659,24 @@ def get_pitch_heatmap(
 
 
 def list_pitch_filter_options(
+    filters: dict[str, Any],
+    parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
+) -> dict[str, Any]:
+    return _list_pitch_filter_options_cached(
+        _cache_signature(parquet_path),
+        _filter_signature(filters),
+    )
+
+
+@lru_cache(maxsize=128)
+def _list_pitch_filter_options_cached(
+    cache_key: tuple[str, int, int, str, int, int],
+    filter_signature: tuple[tuple[str, Any], ...],
+) -> dict[str, Any]:
+    return _list_pitch_filter_options_uncached(_filters_from_signature(filter_signature), cache_key[0])
+
+
+def _list_pitch_filter_options_uncached(
     filters: dict[str, Any],
     parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
 ) -> dict[str, Any]:
@@ -692,7 +791,14 @@ def list_pitch_filter_options(
 def list_cached_pitchers(
     parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
 ) -> list[dict[str, Any]]:
-    with statcast_connection(parquet_path) as connection:
+    return _list_cached_pitchers_cached(_cache_signature(parquet_path))
+
+
+@lru_cache(maxsize=8)
+def _list_cached_pitchers_cached(
+    cache_key: tuple[str, int, int, str, int, int],
+) -> list[dict[str, Any]]:
+    with statcast_connection(cache_key[0]) as connection:
         cursor = connection.execute(
             "SELECT pitcher, player_name, count(*) AS pitch_count, "
             "min(game_date) AS first_game_date, max(game_date) AS last_game_date "

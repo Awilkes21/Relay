@@ -106,7 +106,9 @@ class PitchesApiTests(unittest.TestCase):
                 ],
             },
         )
-        search.assert_called_once_with(
+        search.assert_called_once()
+        self.assertEqual(
+            search.call_args.args[0],
             {
                 "pitcher_id": 605400,
                 "pitcher_name": "skubal",
@@ -127,8 +129,9 @@ class PitchesApiTests(unittest.TestCase):
                 "location_filter": None,
                 "result_order": "latest",
                 "limit": 10,
-            }
+            },
         )
+        self.assertIn("select_fields", search.call_args.kwargs)
 
     def test_rejects_invalid_velocity_range(self):
         response = TestClient(app).get(

@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from app.api.errors import raise_service_error
+from app.api.schemas import PitcherCompareResponse
 from app.services.pitch_compare_service import (
     compare_pitcher_periods,
     resolve_pitcher_id_from_cache,
@@ -20,7 +21,11 @@ MOVEMENT_METADATA = {
 HEATMAP_MODE_PATTERN = "^(all|whiffs|hard_contact|in_zone)$"
 
 
-@router.get("/compare/pitcher")
+@router.get(
+    "/compare/pitcher",
+    response_model=PitcherCompareResponse,
+    response_model_exclude_none=True,
+)
 def compare_pitcher(
     pitcher_id: int | None = Query(default=None, ge=1),
     pitcher_name: str | None = Query(default=None, min_length=1),
@@ -31,7 +36,7 @@ def compare_pitcher(
     pitch_type: str | None = Query(default=None, min_length=1),
     batter_hand: str | None = Query(default=None, pattern="^[LR]$"),
     heatmap_mode: str = Query(default="all", pattern=HEATMAP_MODE_PATTERN),
-    include_heatmaps: bool = Query(default=True),
+    include_heatmaps: bool = Query(default=False),
     x_bins: int = Query(default=25, ge=10, le=60),
     z_bins: int = Query(default=25, ge=10, le=60),
 ) -> dict[str, Any]:

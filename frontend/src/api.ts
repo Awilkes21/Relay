@@ -533,6 +533,7 @@ export async function getPitchHeatmap(
 export async function comparePitcher(
   filters: CompareFilters,
   heatmapMode: HeatmapMode = "all",
+  includeHeatmaps = false,
 ): Promise<PitcherCompareResponse> {
   const params = new URLSearchParams();
 
@@ -543,7 +544,7 @@ export async function comparePitcher(
     }
   });
   params.set("heatmap_mode", heatmapMode);
-  params.set("include_heatmaps", "true");
+  params.set("include_heatmaps", includeHeatmaps ? "true" : "false");
 
   const response = await fetch(`${API_URL}/compare/pitcher?${params.toString()}`);
 
