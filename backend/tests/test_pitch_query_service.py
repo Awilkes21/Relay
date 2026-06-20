@@ -33,7 +33,7 @@ class PitchQueryServiceTests(unittest.TestCase):
             query,
             "SELECT * FROM statcast_pitches "
             "WHERE pitcher = ? AND game_year = ? AND pitch_type = ? "
-            "AND balls = ? AND strikes = ? AND LOWER(player_name) LIKE ? "
+            "AND balls = ? AND strikes = ? AND (LOWER(player_name) LIKE ?) "
             "AND release_speed >= ? "
             "AND release_speed <= ? ORDER BY game_date DESC LIMIT ?",
         )
@@ -41,6 +41,17 @@ class PitchQueryServiceTests(unittest.TestCase):
             params,
             [605400, 2024, "FF", 1, 2, "%skubal%", 95.0, 101.0, 25],
         )
+
+    def test_pitcher_name_filter_matches_display_order(self):
+        query, params = _build_pitch_query({"pitcher_name": "Kevin Gausman", "limit": 25})
+
+        self.assertEqual(
+            query,
+            "SELECT * FROM statcast_pitches "
+            "WHERE (LOWER(player_name) LIKE ? OR LOWER(player_name) LIKE ?) "
+            "ORDER BY game_date DESC LIMIT ?",
+        )
+        self.assertEqual(params, ["%kevin gausman%", "%gausman, kevin%", 25])
 
     def test_defaults_to_limit_100(self):
         query, params = _build_pitch_query({})

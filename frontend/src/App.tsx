@@ -2797,7 +2797,7 @@ function App() {
     }
   }
 
-  function updateProfileSeason(season: string) {
+  async function updateProfileSeason(season: string) {
     const nextSeasonPitches = profileSeasonPitches[season] ?? [];
     const shouldKeepPitchType =
       Boolean(profilePitchType) &&
@@ -2810,6 +2810,41 @@ function App() {
     setProfilePitches(nextSeasonPitches);
     setProfileTotalPitchCount(profileSeasonPitchCounts[season] ?? 0);
     setProfileError(null);
+
+    if (profileSeasonPitches[season]) return;
+
+    const pitcher = resolvableProfilePitcher();
+    if (!pitcher) return;
+
+    const requestId = profileLoadRequestId.current + 1;
+    profileLoadRequestId.current = requestId;
+    setIsProfileLoading(true);
+    setProfileLoadingSeasonCount(1);
+    setProfileLoadedSeasonCount(0);
+
+    try {
+      const response = await getProfilePitches({
+        pitcher_id: String(pitcher.pitcher),
+        pitcher_name: "",
+        season,
+        result_order: "oldest",
+      });
+      if (profileLoadRequestId.current !== requestId) return;
+
+      setProfileSeasonPitches((current) => ({ ...current, [season]: response.results }));
+      setProfileSeasonPitchCounts((current) => ({ ...current, [season]: response.total_count }));
+      setProfilePitches(response.results);
+      setProfileTotalPitchCount(response.total_count);
+      setProfileLoadedSeasonCount(1);
+    } catch (error) {
+      if (profileLoadRequestId.current !== requestId) return;
+      setProfileError(error instanceof Error ? error.message : "Profile season failed to load");
+    } finally {
+      if (profileLoadRequestId.current === requestId) {
+        setIsProfileLoading(false);
+        setProfileLoadingSeasonCount(0);
+      }
+    }
   }
 
   async function loadPitcherProfileForPitcher(
@@ -2843,7 +2878,7 @@ function App() {
     setProfileSeasonPitches({});
     setProfileSeasonPitchCounts({});
     setProfileLoadedSeasonCount(0);
-    setProfileLoadingSeasonCount(seasonOptions.length);
+    setProfileLoadingSeasonCount(1);
     setIsProfileLoading(true);
     setProfileError(null);
 
@@ -2863,19 +2898,6 @@ function App() {
       setProfileSeason(activeSeason);
       setProfileLoadedSeasonCount(1);
 
-      for (const season of seasonOptions.filter((season) => season !== activeSeason)) {
-        const response = await getProfilePitches({
-          pitcher_id: String(pitcher.pitcher),
-          pitcher_name: "",
-          season,
-          result_order: "oldest",
-        });
-        if (profileLoadRequestId.current !== requestId) return;
-
-        setProfileSeasonPitches((current) => ({ ...current, [season]: response.results }));
-        setProfileSeasonPitchCounts((current) => ({ ...current, [season]: response.total_count }));
-        setProfileLoadedSeasonCount((count) => count + 1);
-      }
     } catch (error) {
       if (profileLoadRequestId.current !== requestId) return;
       setProfilePitches([]);

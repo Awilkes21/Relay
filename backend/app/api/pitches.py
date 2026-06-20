@@ -187,7 +187,7 @@ def get_pitches(
     pitch_filters["limit"] = limit
 
     try:
-        search_response = search_pitches(pitch_filters)
+        search_response = search_pitches(pitch_filters, select_fields=PITCH_FIELDS)
         results = [_compact_pitch(row) for row in search_response["results"]]
     except Exception as exc:
         raise_service_error(exc)
@@ -215,7 +215,7 @@ def get_profile_pitches(
     pitch_filters["limit"] = None
 
     try:
-        search_response = search_pitches(pitch_filters)
+        search_response = search_pitches(pitch_filters, select_fields=PITCH_FIELDS)
         results = [_compact_pitch(row) for row in search_response["results"]]
     except Exception as exc:
         raise_service_error(exc)

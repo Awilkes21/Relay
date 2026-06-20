@@ -42,6 +42,22 @@ def _pitch_type_values(value: Any) -> list[str]:
     return [str(value).strip()]
 
 
+def _pitcher_name_patterns(value: Any) -> list[str]:
+    raw_name = str(value).strip().lower()
+    if not raw_name:
+        return []
+
+    patterns = [f"%{raw_name}%"]
+    if "," not in raw_name:
+        parts = raw_name.split()
+        if len(parts) >= 2:
+            first = parts[0]
+            last = " ".join(parts[1:])
+            patterns.append(f"%{last}, {first}%")
+
+    return list(dict.fromkeys(patterns))
+
+
 def _zone_condition() -> str:
     return (
         f"(plate_x BETWEEN {ZONE_LEFT} AND {ZONE_RIGHT} "
@@ -89,8 +105,11 @@ def _build_where_clause(filters: dict[str, Any]) -> tuple[str, list[Any]]:
 
     pitcher_name = filters.get("pitcher_name")
     if pitcher_name:
-        where_clauses.append("LOWER(player_name) LIKE ?")
-        params.append(f"%{str(pitcher_name).lower()}%")
+        pitcher_name_patterns = _pitcher_name_patterns(pitcher_name)
+        where_clauses.append(
+            "(" + " OR ".join("LOWER(player_name) LIKE ?" for _pattern in pitcher_name_patterns) + ")"
+        )
+        params.extend(pitcher_name_patterns)
 
     min_velocity = filters.get("min_velocity")
     if min_velocity is not None:
@@ -144,8 +163,12 @@ def _build_where_clause(filters: dict[str, Any]) -> tuple[str, list[Any]]:
 
 
 def _build_pitch_query(filters: dict[str, Any]) -> tuple[str, list[Any]]:
+    return _build_pitch_query_with_select(filters, "*")
+
+
+def _build_pitch_query_with_select(filters: dict[str, Any], select_sql: str) -> tuple[str, list[Any]]:
     where_sql, params = _build_where_clause(filters)
-    query = "SELECT * FROM statcast_pitches" + where_sql
+    query = f"SELECT {select_sql} FROM statcast_pitches" + where_sql
 
     result_order = filters.get("result_order", "latest")
     if result_order == "oldest":
@@ -161,6 +184,17 @@ def _build_pitch_query(filters: dict[str, Any]) -> tuple[str, list[Any]]:
         params.append(int(limit))
 
     return query, params
+
+
+def _select_sql_for_fields(columns: set[str], fields: list[str] | tuple[str, ...] | None) -> str:
+    if not fields:
+        return "*"
+
+    expressions = [
+        field if field in columns else f"NULL AS {field}"
+        for field in fields
+    ]
+    return ", ".join(expressions)
 
 
 def _build_pitch_count_query(filters: dict[str, Any]) -> tuple[str, list[Any]]:
@@ -289,17 +323,22 @@ def _filters_without(filters: dict[str, Any], *filter_names: str) -> dict[str, A
 def search_pitches(
     filters: dict[str, Any],
     parquet_path: Path | str = DEFAULT_STATCAST_PARQUET,
+    select_fields: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
-    query, params = _build_pitch_query(filters)
-    count_query, count_params = _build_pitch_count_query(filters)
-
     with statcast_connection(parquet_path) as connection:
-        total_count = int(connection.execute(count_query, count_params).fetchone()[0])
+        select_sql = _select_sql_for_fields(table_columns(connection), select_fields)
+        query, params = _build_pitch_query_with_select(filters, select_sql)
         cursor = connection.execute(query, params)
         columns = [description[0] for description in cursor.description]
+        results = _rows_to_dicts(columns, cursor.fetchall())
+        if filters.get("limit") is None:
+            total_count = len(results)
+        else:
+            count_query, count_params = _build_pitch_count_query(filters)
+            total_count = int(connection.execute(count_query, count_params).fetchone()[0])
         return {
             "total_count": total_count,
-            "results": _rows_to_dicts(columns, cursor.fetchall()),
+            "results": results,
         }
 
 
